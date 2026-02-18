@@ -225,6 +225,7 @@ export PATH="$HOME/local/tools:$PATH"
 alias gohome='cd ~/'
 alias yolo='claude --dangerously-skip-permissions'
 alias yoloresume='claude --resume --dangerously-skip-permissions'
+alias yoloedge='bash ~/local/helpers/scripts/launch-edge.sh'
 # <<< wsl-setup <<<
 SHELL_CONFIG
     ok "~/.bashrc updated"

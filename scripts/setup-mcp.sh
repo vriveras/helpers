@@ -45,8 +45,8 @@ log "Checking dependencies..."
 command -v npx &>/dev/null || die "npx not found. Run setup-wsl.sh first."
 ok "npx found"
 
-[ -f "$HOME/.claude.json" ] || die "~/.claude.json not found. Launch Claude Code once first to generate it."
-ok "~/.claude.json found"
+[ -f "$HOME/.claude/settings.json" ] || die "~/.claude/settings.json not found. Launch Claude Code once first to generate it."
+ok "~/.claude/settings.json found"
 
 # ── ADO Configuration Input ───────────────────────────────────────────────────
 section "Azure DevOps Configuration"
@@ -94,11 +94,11 @@ else
     CDP_ENDPOINT="http://127.0.0.1:9222"
 fi
 
-log "Writing MCP config directly to ~/.claude.json..."
+log "Writing MCP config to ~/.claude/settings.json..."
 python3 - <<PYEOF
 import json, sys
 
-path = '/home/virivera/.claude.json'
+path = '/home/virivera/.claude/settings.json'
 cdp  = '${CDP_ENDPOINT}'
 org  = '${ADO_ORG}'
 pat  = '${ADO_MCP_AUTH_TOKEN}'
@@ -136,7 +136,7 @@ ok "Azure DevOps MCP configured → org: ${ADO_ORG}"
 section "Configured MCP Servers"
 python3 - <<PYEOF
 import json
-with open('/home/virivera/.claude.json', 'r') as f:
+with open('/home/virivera/.claude/settings.json', 'r') as f:
     config = json.load(f)
 servers = config.get('mcpServers', {})
 if servers:

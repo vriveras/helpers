@@ -42,11 +42,11 @@ echo ""
 section "Preflight"
 log "Checking dependencies..."
 
-command -v claude &>/dev/null || die "Claude Code CLI not found. Run setup-wsl.sh first."
-ok "Claude Code CLI found"
-
 command -v npx &>/dev/null || die "npx not found. Run setup-wsl.sh first."
 ok "npx found"
+
+[ -f "$HOME/.claude.json" ] || die "~/.claude.json not found. Launch Claude Code once first to generate it."
+ok "~/.claude.json found"
 
 # ── ADO Configuration Input ───────────────────────────────────────────────────
 section "Azure DevOps Configuration"
@@ -94,28 +94,58 @@ else
     CDP_ENDPOINT="http://127.0.0.1:9222"
 fi
 
-log "Removing existing playwright MCP config (if any)..."
-claude mcp remove playwright 2>/dev/null || true
+log "Writing MCP config directly to ~/.claude.json..."
+python3 - <<PYEOF
+import json, sys
 
-log "Adding Playwright MCP server..."
-claude mcp add -s user playwright -- npx -y @playwright/mcp@latest --cdp-endpoint "$CDP_ENDPOINT"
+path = '/home/virivera/.claude.json'
+cdp  = '${CDP_ENDPOINT}'
+org  = '${ADO_ORG}'
+pat  = '${ADO_MCP_AUTH_TOKEN}'
+
+with open(path, 'r') as f:
+    config = json.load(f)
+
+config.setdefault('mcpServers', {})
+
+config['mcpServers']['playwright'] = {
+    'type': 'stdio',
+    'command': 'npx',
+    'args': ['-y', '@playwright/mcp@latest', '--cdp-endpoint', cdp]
+}
+
+config['mcpServers']['azure-devops'] = {
+    'type': 'stdio',
+    'command': 'npx',
+    'args': ['-y', '@azure-devops/mcp', org],
+    'env': {
+        'ADO_MCP_AUTH_TOKEN': pat
+    }
+}
+
+with open(path, 'w') as f:
+    json.dump(config, f, indent=2)
+
+print('OK')
+PYEOF
+
 ok "Playwright MCP configured → CDP endpoint: ${CDP_ENDPOINT}"
-
-# ── Azure DevOps MCP ──────────────────────────────────────────────────────────
-section "Azure DevOps MCP"
-
-log "Removing existing azure-devops MCP config (if any)..."
-claude mcp remove azure-devops 2>/dev/null || true
-
-log "Adding Azure DevOps MCP server..."
-claude mcp add -s user \
-    --env ADO_MCP_AUTH_TOKEN="$ADO_MCP_AUTH_TOKEN" \
-    azure-devops -- npx -y @azure-devops/mcp "$ADO_ORG"
 ok "Azure DevOps MCP configured → org: ${ADO_ORG}"
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 section "Configured MCP Servers"
-claude mcp list
+python3 - <<PYEOF
+import json
+with open('/home/virivera/.claude.json', 'r') as f:
+    config = json.load(f)
+servers = config.get('mcpServers', {})
+if servers:
+    for name, cfg in servers.items():
+        cmd = cfg.get('command', '') + ' ' + ' '.join(cfg.get('args', []))
+        print(f"  • {name}: {cmd[:80]}")
+else:
+    print("  (none)")
+PYEOF
 
 echo ""
 echo -e "${GREEN}${BOLD}"

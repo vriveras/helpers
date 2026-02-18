@@ -53,6 +53,60 @@ else
     warn "Already configured — skipped"
 fi
 
+# ── .wslconfig (Windows host) ─────────────────────────────────────────────────
+section "Windows WSL Resource Limits & Networking"
+
+# Locate the Windows user profile
+WIN_USER=$(powershell.exe -NoProfile -Command '$env:USERNAME' 2>/dev/null | tr -d '\r\n')
+WSLCONFIG="/mnt/c/Users/${WIN_USER}/.wslconfig"
+
+log "Windows user: ${WIN_USER}"
+log "Target file:  ${WSLCONFIG}"
+echo ""
+
+# Show current values if file exists
+CURRENT_MEM=""
+CURRENT_CPU=""
+if [ -f "$WSLCONFIG" ]; then
+    CURRENT_MEM=$(grep -i '^memory' "$WSLCONFIG" 2>/dev/null | cut -d= -f2 | tr -d ' ' || true)
+    CURRENT_CPU=$(grep -i '^processors' "$WSLCONFIG" 2>/dev/null | cut -d= -f2 | tr -d ' ' || true)
+fi
+
+# Prompt for memory
+if [ -n "$CURRENT_MEM" ]; then
+    echo -e "  ${BOLD}Memory limit${NC} ${DIM}(current: ${CURRENT_MEM})${NC}"
+else
+    echo -e "  ${BOLD}Memory limit${NC} ${DIM}(e.g. 8GB, 16GB, 32GB)${NC}"
+fi
+echo -n "  Enter value [default: 8GB]: "
+read -r INPUT_MEM
+WSL_MEMORY="${INPUT_MEM:-8GB}"
+
+# Prompt for CPU cores
+if [ -n "$CURRENT_CPU" ]; then
+    echo -e "  ${BOLD}CPU cores${NC} ${DIM}(current: ${CURRENT_CPU})${NC}"
+else
+    echo -e "  ${BOLD}CPU cores${NC} ${DIM}(e.g. 4, 8, 16)${NC}"
+fi
+echo -n "  Enter value [default: 4]: "
+read -r INPUT_CPU
+WSL_PROCESSORS="${INPUT_CPU:-4}"
+
+echo ""
+log "Writing .wslconfig → memory=${WSL_MEMORY}, processors=${WSL_PROCESSORS}, networkingMode=mirrored"
+
+cat > "$WSLCONFIG" <<EOF
+[wsl2]
+memory=${WSL_MEMORY}
+processors=${WSL_PROCESSORS}
+
+[experimental]
+networkingMode=mirrored
+EOF
+
+ok "memory=${WSL_MEMORY}  |  processors=${WSL_PROCESSORS}  |  networkingMode=mirrored"
+warn "Run 'wsl --shutdown' from Windows PowerShell to apply these changes"
+
 # ── Directories ───────────────────────────────────────────────────────────────
 section "Directories"
 log "Creating ~/local workspace..."
@@ -251,7 +305,7 @@ echo -e "${NC}"
 echo -e "  ${BOLD}Next steps:${NC}"
 echo -e "  ${DIM}1.${NC}  source ~/.bashrc"
 echo -e "  ${DIM}2.${NC}  gh auth login"
-echo -e "  ${DIM}3.${NC}  wsl --shutdown    ${DIM}(from Windows, to apply interop)${NC}"
+echo -e "  ${DIM}3.${NC}  wsl --shutdown    ${DIM}(from Windows, to apply .wslconfig + interop)${NC}"
 echo ""
 echo -e "  ${DIM}Finished: $(date '+%H:%M')${NC}"
 echo ""

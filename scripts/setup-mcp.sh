@@ -95,22 +95,22 @@ else
 fi
 
 log "Removing existing playwright MCP config (if any)..."
-claude mcp remove playwright -s user 2>/dev/null || true
+claude mcp remove playwright 2>/dev/null || true
 
 log "Adding Playwright MCP server..."
-claude mcp add playwright -s user -- npx -y @playwright/mcp@latest --cdp-endpoint "$CDP_ENDPOINT"
+claude mcp add -s user playwright -- npx -y @playwright/mcp@latest --cdp-endpoint "$CDP_ENDPOINT"
 ok "Playwright MCP configured → CDP endpoint: ${CDP_ENDPOINT}"
 
 # ── Azure DevOps MCP ──────────────────────────────────────────────────────────
 section "Azure DevOps MCP"
 
 log "Removing existing azure-devops MCP config (if any)..."
-claude mcp remove azure-devops -s user 2>/dev/null || true
+claude mcp remove azure-devops 2>/dev/null || true
 
 log "Adding Azure DevOps MCP server..."
-claude mcp add azure-devops -s user \
+claude mcp add -s user \
     --env ADO_MCP_AUTH_TOKEN="$ADO_MCP_AUTH_TOKEN" \
-    -- npx -y @azure-devops/mcp "$ADO_ORG"
+    azure-devops -- npx -y @azure-devops/mcp "$ADO_ORG"
 ok "Azure DevOps MCP configured → org: ${ADO_ORG}"
 
 # ── Summary ───────────────────────────────────────────────────────────────────

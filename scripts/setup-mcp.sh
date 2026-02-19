@@ -50,29 +50,11 @@ ok "~/.claude/settings.json found"
 
 # ── ADO Configuration Input ───────────────────────────────────────────────────
 section "Azure DevOps Configuration"
-
-if [ -n "${ADO_ORG:-}" ] && [ -n "${ADO_MCP_AUTH_TOKEN:-}" ]; then
-    log "Using ADO_ORG and ADO_MCP_AUTH_TOKEN from environment"
-else
-    echo ""
-    echo -e "  ${BOLD}Azure DevOps Organization${NC}"
-    echo -e "  ${DIM}e.g. if your ADO URL is dev.azure.com/contoso → enter: contoso${NC}"
-    echo -n "  Organization name: "
-    read -r ADO_ORG
-
-    echo ""
-    echo -e "  ${BOLD}Azure DevOps Personal Access Token${NC}"
-    echo -e "  ${DIM}Needs scopes: Work Items (read/write), Code (read), Build (read)${NC}"
-    echo -n "  PAT token: "
-    read -rs ADO_MCP_AUTH_TOKEN
-    echo ""
-fi
-
-[ -z "$ADO_ORG" ]             && die "Organization name cannot be empty"
-[ -z "$ADO_MCP_AUTH_TOKEN" ]  && die "PAT token cannot be empty"
-
-ok "ADO org: ${ADO_ORG}"
-ok "PAT token: ${ADO_MCP_AUTH_TOKEN:0:4}****${ADO_MCP_AUTH_TOKEN: -4}"
+echo ""
+echo -e "  ${DIM}Authentication is browser-based (Microsoft account) — no PAT needed.${NC}"
+echo -e "  ${DIM}You will be prompted to log in on first use inside Claude Code.${NC}"
+echo ""
+ok "No credentials required at setup time"
 
 # ── Playwright MCP ────────────────────────────────────────────────────────────
 section "Playwright MCP"
@@ -96,12 +78,10 @@ fi
 
 log "Writing MCP config to ~/.claude/settings.json..."
 python3 - <<PYEOF
-import json, sys
+import json
 
 path = '/home/virivera/.claude/settings.json'
 cdp  = '${CDP_ENDPOINT}'
-org  = '${ADO_ORG}'
-pat  = '${ADO_MCP_AUTH_TOKEN}'
 
 with open(path, 'r') as f:
     config = json.load(f)
@@ -114,13 +94,11 @@ config['mcpServers']['playwright'] = {
     'args': ['-y', '@playwright/mcp@latest', '--cdp-endpoint', cdp]
 }
 
+# ADO MCP uses browser-based Microsoft account auth — no PAT needed
 config['mcpServers']['azure-devops'] = {
     'type': 'stdio',
     'command': 'npx',
-    'args': ['-y', '@azure-devops/mcp', org],
-    'env': {
-        'ADO_MCP_AUTH_TOKEN': pat
-    }
+    'args': ['-y', '@azure-devops/mcp']
 }
 
 with open(path, 'w') as f:
@@ -130,7 +108,7 @@ print('OK')
 PYEOF
 
 ok "Playwright MCP configured → CDP endpoint: ${CDP_ENDPOINT}"
-ok "Azure DevOps MCP configured → org: ${ADO_ORG}"
+ok "Azure DevOps MCP configured → browser auth on first use"
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 section "Configured MCP Servers"
@@ -157,6 +135,6 @@ echo "  ╚═══════════════════════
 echo -e "${NC}"
 echo -e "  ${BOLD}Next steps:${NC}"
 echo -e "  ${DIM}1.${NC}  Restart Claude Code to load the new MCP servers"
-echo -e "  ${DIM}2.${NC}  Make sure Edge is running with --remote-debugging-port=9222"
-echo -e "  ${DIM}3.${NC}  Ask Claude to browse the web or query Azure DevOps"
+echo -e "  ${DIM}2.${NC}  Run 'yoloedge' to launch Edge for Playwright"
+echo -e "  ${DIM}3.${NC}  On first ADO tool use, a browser will open for Microsoft login"
 echo ""

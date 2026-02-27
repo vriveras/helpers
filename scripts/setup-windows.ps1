@@ -341,10 +341,9 @@ Section "Bun"
 if (Get-Command bun -ErrorAction SilentlyContinue) {
     Ok "Bun $(bun --version) already installed"
 } else {
-    Log "Installing Bun..."
-    irm bun.sh/install.ps1 | iex
-    $bunBin = Join-Path $HOME ".bun\bin"
-    if ($env:Path -notlike "*$bunBin*") { $env:Path = "$bunBin;$env:Path" }
+    Log "Installing Bun via winget..."
+    winget install --id Oven-sh.Bun --source winget --accept-package-agreements --accept-source-agreements
+    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
     if (Get-Command bun -ErrorAction SilentlyContinue) {
         Ok "Bun $(bun --version)"
     } else {

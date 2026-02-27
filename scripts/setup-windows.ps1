@@ -16,12 +16,22 @@ if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdent
 
 $ErrorActionPreference = 'Stop'
 
+# ── Log File ─────────────────────────────────────────────────────────────────
+$logDir = Join-Path $HOME "local\logs"
+if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
+$logFile = Join-Path $logDir "setup-windows_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
+Start-Transcript -Path $logFile -Append | Out-Null
+
+# Summary tracking
+$script:summary = [System.Collections.ArrayList]::new()
+function Add-Summary { param([string]$icon, [string]$section, [string]$msg) $script:summary.Add([PSCustomObject]@{ Icon=$icon; Section=$section; Message=$msg }) | Out-Null }
+
 # ── Colors / Helpers ─────────────────────────────────────────────────────────
 function Log     { param([string]$msg) Write-Host "  " -NoNewline; Write-Host "→" -ForegroundColor Blue -NoNewline; Write-Host " $msg" }
-function Ok      { param([string]$msg) Write-Host "  " -NoNewline; Write-Host "✓" -ForegroundColor Green -NoNewline; Write-Host " $msg" }
-function Warn    { param([string]$msg) Write-Host "  " -NoNewline; Write-Host "⚠" -ForegroundColor Yellow -NoNewline; Write-Host "  $msg" }
-function Fail    { param([string]$msg) Write-Host "  " -NoNewline; Write-Host "✗" -ForegroundColor Red -NoNewline; Write-Host " $msg"; exit 1 }
-function Section { param([string]$msg) Write-Host ""; Write-Host "┌─ $msg " -ForegroundColor Cyan -NoNewline; Write-Host "────────────────────────────────────────" -ForegroundColor DarkGray }
+function Ok      { param([string]$msg) Write-Host "  " -NoNewline; Write-Host "✓" -ForegroundColor Green -NoNewline; Write-Host " $msg"; Add-Summary "✓" $script:currentSection $msg }
+function Warn    { param([string]$msg) Write-Host "  " -NoNewline; Write-Host "⚠" -ForegroundColor Yellow -NoNewline; Write-Host "  $msg"; Add-Summary "⚠" $script:currentSection $msg }
+function Fail    { param([string]$msg) Write-Host "  " -NoNewline; Write-Host "✗" -ForegroundColor Red -NoNewline; Write-Host " $msg"; Add-Summary "✗" $script:currentSection $msg; exit 1 }
+function Section { param([string]$msg) Write-Host ""; Write-Host "┌─ $msg " -ForegroundColor Cyan -NoNewline; Write-Host "────────────────────────────────────────" -ForegroundColor DarkGray; $script:currentSection = $msg }
 
 # ── Banner ───────────────────────────────────────────────────────────────────
 Clear-Host
@@ -493,6 +503,31 @@ Write-Host @"
 
 "@ -ForegroundColor Green
 
+# ── Summary ─────────────────────────────────────────────────────────────────
+Write-Host ""
+Write-Host "  ┌─ Setup Summary " -ForegroundColor Cyan -NoNewline; Write-Host "────────────────────────────────────────" -ForegroundColor DarkGray
+Write-Host ""
+
+$okCount = ($script:summary | Where-Object { $_.Icon -eq "✓" }).Count
+$warnCount = ($script:summary | Where-Object { $_.Icon -eq "⚠" }).Count
+$failCount = ($script:summary | Where-Object { $_.Icon -eq "✗" }).Count
+
+foreach ($entry in $script:summary) {
+    $color = switch ($entry.Icon) { "✓" { "Green" } "⚠" { "Yellow" } "✗" { "Red" } default { "White" } }
+    Write-Host "  $($entry.Icon)" -ForegroundColor $color -NoNewline
+    Write-Host " [$($entry.Section)]" -ForegroundColor DarkGray -NoNewline
+    Write-Host " $($entry.Message)"
+}
+
+Write-Host ""
+Write-Host "  Totals: " -NoNewline
+Write-Host "$okCount passed" -ForegroundColor Green -NoNewline
+Write-Host ", " -NoNewline
+Write-Host "$warnCount warnings" -ForegroundColor Yellow -NoNewline
+Write-Host ", " -NoNewline
+Write-Host "$failCount failed" -ForegroundColor Red
+Write-Host ""
+
 Write-Host "  Next steps:" -ForegroundColor White
 Write-Host "  1." -ForegroundColor DarkGray -NoNewline; Write-Host "  Restart your terminal (or run: . `$PROFILE)"
 Write-Host "  2." -ForegroundColor DarkGray -NoNewline; Write-Host "  gh auth login"
@@ -500,5 +535,8 @@ Write-Host "  3." -ForegroundColor DarkGray -NoNewline; Write-Host "  Set termin
 Write-Host "  4." -ForegroundColor DarkGray -NoNewline; Write-Host "  wsl --install Ubuntu  (if WSL distro not yet installed)"
 Write-Host "  5." -ForegroundColor DarkGray -NoNewline; Write-Host "  Consider running from pwsh (PowerShell 7) going forward"
 Write-Host ""
+Write-Host "  Log file: $logFile" -ForegroundColor DarkGray
 Write-Host "  Finished: $(Get-Date -Format 'HH:mm')" -ForegroundColor DarkGray
 Write-Host ""
+
+Stop-Transcript | Out-Null

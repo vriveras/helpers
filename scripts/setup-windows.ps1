@@ -375,11 +375,13 @@ $pyenvRoot = Join-Path $HOME ".pyenv\pyenv-win"
 if (Get-Command pyenv -ErrorAction SilentlyContinue) {
     Ok "$(pyenv --version)"
 } else {
-    Log "Installing pyenv-win..."
-    winget install --id pyenv-win.pyenv-win --source winget --accept-package-agreements --accept-source-agreements 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        Log "winget failed — installing via pip..."
-        pip install pyenv-win --target "$HOME\.pyenv" 2>$null
+    Log "Installing pyenv-win via installer script..."
+    try {
+        Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/pyenv-win/pyenv-win/master/pyenv-win/install-pyenv-win.ps1" -OutFile "$env:TEMP\install-pyenv-win.ps1"
+        & "$env:TEMP\install-pyenv-win.ps1"
+        Remove-Item "$env:TEMP\install-pyenv-win.ps1" -ErrorAction SilentlyContinue
+    } catch {
+        Warn "pyenv-win install script failed: $_"
     }
     # Add pyenv to PATH for this session
     $pyenvBin = Join-Path $pyenvRoot "bin"

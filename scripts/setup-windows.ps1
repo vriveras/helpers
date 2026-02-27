@@ -49,24 +49,32 @@ Write-Host ""
 
 # ── Modern PowerShell (pwsh) ─────────────────────────────────────────────────
 Section "PowerShell 7+ (latest)"
-Log "Installing / upgrading PowerShell 7 via winget..."
-winget upgrade --id Microsoft.PowerShell --source winget --accept-package-agreements --accept-source-agreements 2>$null
-if ($LASTEXITCODE -ne 0) {
-    # Not yet installed — try a fresh install
+$pwshInstalled = [bool](Get-Command pwsh -ErrorAction SilentlyContinue)
+$pwshNeedsWork = $true
+
+if ($pwshInstalled) {
+    Log "Upgrading PowerShell 7 via winget..."
+    winget upgrade --id Microsoft.PowerShell --source winget --accept-package-agreements --accept-source-agreements 2>$null
+    # Exit code 0 = upgraded, -1978335189 (0x8A150013) = no update available — both are fine
+    if ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq -1978335189) { $pwshNeedsWork = $false }
+} else {
+    Log "Installing PowerShell 7 via winget..."
     winget install --id Microsoft.PowerShell --source winget --accept-package-agreements --accept-source-agreements
+    if ($LASTEXITCODE -eq 0) { $pwshNeedsWork = $false }
 }
-if ($LASTEXITCODE -ne 0) {
+
+if ($pwshNeedsWork) {
     Warn "winget failed — trying GitHub MSI installer..."
     $arch = if ([Environment]::Is64BitOperatingSystem) { "x64" } else { "x86" }
     # Fetch the latest release tag from GitHub API
     try {
-        $latestRelease = (Invoke-RestMethod -Uri "https://api.github.com/repos/PowerShell/PowerShell/releases/latest" -UseBasicParsing).tag_name -replace '^v', ''
+        $latestRelease = (Invoke-RestMethod -Uri "https://api.github.com/repos/PowerShell/PowerShell/releases/latest").tag_name -replace '^v', ''
         Log "Latest release: $latestRelease"
     } catch {
         $latestRelease = "7.5.1"
         Warn "Could not query GitHub API — falling back to v$latestRelease"
     }
-    $msiUrl = "https://github.com/PowerShell/PowerShell/releases/latest/download/PowerShell-$latestRelease-win-$arch.msi"
+    $msiUrl = "https://github.com/PowerShell/PowerShell/releases/download/v$latestRelease/PowerShell-$latestRelease-win-$arch.msi"
     $msiPath = "$env:TEMP\pwsh-install.msi"
     Log "Downloading from $msiUrl..."
     Invoke-WebRequest -Uri $msiUrl -OutFile $msiPath -UseBasicParsing
@@ -165,13 +173,18 @@ if ($vsInstalled) {
     $vsVer = & $vsWhere -products 'Microsoft.VisualStudio.Product.Enterprise' -latest -property catalog_productDisplayVersion 2>$null
     Ok "Visual Studio Enterprise $vsVer already installed"
     Log "Ensuring required workloads are present (modify)..."
-    $modifyArgs = @("modify", "--installPath", "`"$vsPath`"", "--quiet", "--norestart")
+    $modifyArgs = @("modify", "--installPath", $vsPath, "--passive", "--norestart")
     foreach ($wl in $workloads) { $modifyArgs += "--add"; $modifyArgs += $wl }
     foreach ($comp in $components) { $modifyArgs += "--add"; $modifyArgs += $comp }
     $installer = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
     if (Test-Path $installer) {
-        Start-Process -FilePath $installer -ArgumentList ($modifyArgs -join ' ') -Wait
-        Ok "Workloads verified / updated"
+        Log "Running VS Installer modify — a progress window will appear..."
+        $proc = Start-Process -FilePath $installer -ArgumentList $modifyArgs -Wait -PassThru
+        if ($proc.ExitCode -eq 0) {
+            Ok "Workloads verified / updated"
+        } else {
+            Warn "VS Installer exited with code $($proc.ExitCode) — open Visual Studio Installer to verify workloads"
+        }
     } else {
         Warn "VS Installer not found — open Visual Studio Installer manually to add workloads"
     }
@@ -181,24 +194,24 @@ if ($vsInstalled) {
     $bootstrapperPath = "$env:TEMP\vs_enterprise.exe"
     Log "Downloading VS Enterprise bootstrapper..."
     Invoke-WebRequest -Uri $bootstrapperUrl -OutFile $bootstrapperPath -UseBasicParsing
-    $installArgs = @("--quiet", "--wait", "--norestart")
+    $installArgs = @("--passive", "--wait", "--norestart")
     foreach ($wl in $workloads) { $installArgs += "--add"; $installArgs += $wl }
     foreach ($comp in $components) { $installArgs += "--add"; $installArgs += $comp }
     $installArgs += "--includeRecommended"
-    Log "Running installer — this may take 15-30+ minutes..."
-    Start-Process -FilePath $bootstrapperPath -ArgumentList ($installArgs -join ' ') -Wait
+    Log "Running installer — a progress window will appear (this may take 15-30+ minutes)..."
+    $proc = Start-Process -FilePath $bootstrapperPath -ArgumentList $installArgs -Wait -PassThru
     Remove-Item $bootstrapperPath -ErrorAction SilentlyContinue
-    # Check result
-    if (Test-Path $vsWhere) {
-        $vsPath = & $vsWhere -products 'Microsoft.VisualStudio.Product.Enterprise' -latest -property installationPath 2>$null
-        if ($vsPath) {
+    if ($proc.ExitCode -eq 0 -or $proc.ExitCode -eq 3010) {
+        # 3010 = success but reboot required
+        if (Test-Path $vsWhere) {
             $vsVer = & $vsWhere -products 'Microsoft.VisualStudio.Product.Enterprise' -latest -property catalog_productDisplayVersion 2>$null
             Ok "Visual Studio Enterprise $vsVer installed"
         } else {
-            Warn "Installer finished — verify Visual Studio Enterprise in Start Menu"
+            Ok "Visual Studio Enterprise installed — restart to complete"
         }
+        if ($proc.ExitCode -eq 3010) { Warn "A reboot is required to complete VS installation" }
     } else {
-        Warn "Installer finished — restart and verify installation"
+        Warn "VS installer exited with code $($proc.ExitCode) — open Visual Studio Installer to verify"
     }
 }
 

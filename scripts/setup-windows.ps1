@@ -140,6 +140,68 @@ if (Get-Command code -ErrorAction SilentlyContinue) {
     }
 }
 
+# ── Visual Studio Enterprise ────────────────────────────────────────────────
+Section "Visual Studio Enterprise"
+$vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+$vsInstalled = $false
+if (Test-Path $vsWhere) {
+    $vsPath = & $vsWhere -products 'Microsoft.VisualStudio.Product.Enterprise' -latest -property installationPath 2>$null
+    if ($vsPath) { $vsInstalled = $true }
+}
+
+# Workload IDs
+$workloads = @(
+    "Microsoft.VisualStudio.Workload.NativeDesktop",     # C++ / CMake
+    "Microsoft.VisualStudio.Workload.ManagedDesktop",     # C# / .NET
+    "Microsoft.VisualStudio.Workload.NetWeb",             # ASP.NET / Web
+    "Microsoft.VisualStudio.Workload.NativeGame"          # Windows Development (DirectX, Win32)
+)
+# Include the CMake component explicitly
+$components = @(
+    "Microsoft.VisualStudio.Component.VC.CMake.Project"
+)
+
+if ($vsInstalled) {
+    $vsVer = & $vsWhere -products 'Microsoft.VisualStudio.Product.Enterprise' -latest -property catalog_productDisplayVersion 2>$null
+    Ok "Visual Studio Enterprise $vsVer already installed"
+    Log "Ensuring required workloads are present (modify)..."
+    $modifyArgs = @("modify", "--installPath", "`"$vsPath`"", "--quiet", "--norestart")
+    foreach ($wl in $workloads) { $modifyArgs += "--add"; $modifyArgs += $wl }
+    foreach ($comp in $components) { $modifyArgs += "--add"; $modifyArgs += $comp }
+    $installer = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
+    if (Test-Path $installer) {
+        Start-Process -FilePath $installer -ArgumentList ($modifyArgs -join ' ') -Wait
+        Ok "Workloads verified / updated"
+    } else {
+        Warn "VS Installer not found — open Visual Studio Installer manually to add workloads"
+    }
+} else {
+    Log "Installing Visual Studio Enterprise with workloads (this will take a while)..."
+    $bootstrapperUrl = "https://aka.ms/vs/17/release/vs_enterprise.exe"
+    $bootstrapperPath = "$env:TEMP\vs_enterprise.exe"
+    Log "Downloading VS Enterprise bootstrapper..."
+    Invoke-WebRequest -Uri $bootstrapperUrl -OutFile $bootstrapperPath -UseBasicParsing
+    $installArgs = @("--quiet", "--wait", "--norestart")
+    foreach ($wl in $workloads) { $installArgs += "--add"; $installArgs += $wl }
+    foreach ($comp in $components) { $installArgs += "--add"; $installArgs += $comp }
+    $installArgs += "--includeRecommended"
+    Log "Running installer — this may take 15-30+ minutes..."
+    Start-Process -FilePath $bootstrapperPath -ArgumentList ($installArgs -join ' ') -Wait
+    Remove-Item $bootstrapperPath -ErrorAction SilentlyContinue
+    # Check result
+    if (Test-Path $vsWhere) {
+        $vsPath = & $vsWhere -products 'Microsoft.VisualStudio.Product.Enterprise' -latest -property installationPath 2>$null
+        if ($vsPath) {
+            $vsVer = & $vsWhere -products 'Microsoft.VisualStudio.Product.Enterprise' -latest -property catalog_productDisplayVersion 2>$null
+            Ok "Visual Studio Enterprise $vsVer installed"
+        } else {
+            Warn "Installer finished — verify Visual Studio Enterprise in Start Menu"
+        }
+    } else {
+        Warn "Installer finished — restart and verify installation"
+    }
+}
+
 # ── Oh My Posh ──────────────────────────────────────────────────────────────
 Section "Oh My Posh"
 if (Get-Command oh-my-posh -ErrorAction SilentlyContinue) {

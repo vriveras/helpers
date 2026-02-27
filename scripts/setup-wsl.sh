@@ -2,6 +2,14 @@
 # WSL Development Environment Setup Script
 set -euo pipefail
 
+# ── Log File ──────────────────────────────────────────────────────────────────
+LOG_DIR="$HOME/local/logs"
+mkdir -p "$LOG_DIR"
+LOG_FILE="$LOG_DIR/setup-wsl_$(date '+%Y%m%d_%H%M%S').log"
+
+# Duplicate all output (stdout+stderr) to the log file while keeping terminal output
+exec > >(tee -a "$LOG_FILE") 2>&1
+
 # ── Colors ────────────────────────────────────────────────────────────────────
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
@@ -12,11 +20,17 @@ BOLD='\033[1m'
 DIM='\033[2m'
 NC='\033[0m'
 
+# Summary tracking
+SUMMARY_FILE=$(mktemp)
+CURRENT_SECTION=""
+
+add_summary() { echo "$1|$2|$3" >> "$SUMMARY_FILE"; }
+
 log()     { echo -e "  ${BLUE}→${NC} $*"; }
-ok()      { echo -e "  ${GREEN}✓${NC} $*"; }
-warn()    { echo -e "  ${YELLOW}⚠${NC}  $*"; }
-die()     { echo -e "  ${RED}✗${NC} $*"; exit 1; }
-section() { echo -e "\n${CYAN}${BOLD}┌─ $* ${NC}${DIM}────────────────────────────────────────${NC}"; }
+ok()      { echo -e "  ${GREEN}✓${NC} $*"; add_summary "✓" "$CURRENT_SECTION" "$*"; }
+warn()    { echo -e "  ${YELLOW}⚠${NC}  $*"; add_summary "⚠" "$CURRENT_SECTION" "$*"; }
+die()     { echo -e "  ${RED}✗${NC} $*"; add_summary "✗" "$CURRENT_SECTION" "$*"; exit 1; }
+section() { echo -e "\n${CYAN}${BOLD}┌─ $* ${NC}${DIM}────────────────────────────────────────${NC}"; CURRENT_SECTION="$*"; }
 
 # ── Banner ────────────────────────────────────────────────────────────────────
 clear
@@ -302,10 +316,29 @@ echo "  ║              Environment Ready!                      ║"
 echo "  ║                                                      ║"
 echo "  ╚══════════════════════════════════════════════════════╝"
 echo -e "${NC}"
+# ── Summary ──────────────────────────────────────────────────────────────────
+echo -e "\n${CYAN}${BOLD}┌─ Setup Summary ${NC}${DIM}────────────────────────────────────────${NC}"
+echo ""
+
+OK_COUNT=0; WARN_COUNT=0; FAIL_COUNT=0
+while IFS='|' read -r icon sect msg; do
+    case "$icon" in
+        "✓") echo -e "  ${GREEN}✓${NC} ${DIM}[${sect}]${NC} ${msg}"; OK_COUNT=$((OK_COUNT + 1)) ;;
+        "⚠") echo -e "  ${YELLOW}⚠${NC} ${DIM}[${sect}]${NC} ${msg}"; WARN_COUNT=$((WARN_COUNT + 1)) ;;
+        "✗") echo -e "  ${RED}✗${NC} ${DIM}[${sect}]${NC} ${msg}"; FAIL_COUNT=$((FAIL_COUNT + 1)) ;;
+    esac
+done < "$SUMMARY_FILE"
+rm -f "$SUMMARY_FILE"
+
+echo ""
+echo -e "  Totals: ${GREEN}${OK_COUNT} passed${NC}, ${YELLOW}${WARN_COUNT} warnings${NC}, ${RED}${FAIL_COUNT} failed${NC}"
+echo ""
+
 echo -e "  ${BOLD}Next steps:${NC}"
 echo -e "  ${DIM}1.${NC}  source ~/.bashrc"
 echo -e "  ${DIM}2.${NC}  gh auth login"
 echo -e "  ${DIM}3.${NC}  wsl --shutdown    ${DIM}(from Windows, to apply .wslconfig + interop)${NC}"
 echo ""
+echo -e "  ${DIM}Log file: ${LOG_FILE}${NC}"
 echo -e "  ${DIM}Finished: $(date '+%H:%M')${NC}"
 echo ""

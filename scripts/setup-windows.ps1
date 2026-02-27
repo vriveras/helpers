@@ -48,31 +48,121 @@ Write-Host "  Windows · PowerShell · $(Get-Date -Format 'dddd, MMMM dd yyyy  H
 Write-Host ""
 
 # ── Modern PowerShell (pwsh) ─────────────────────────────────────────────────
-Section "PowerShell 7+"
+Section "PowerShell 7+ (latest)"
+Log "Installing / upgrading PowerShell 7 via winget..."
+winget upgrade --id Microsoft.PowerShell --source winget --accept-package-agreements --accept-source-agreements 2>$null
+if ($LASTEXITCODE -ne 0) {
+    # Not yet installed — try a fresh install
+    winget install --id Microsoft.PowerShell --source winget --accept-package-agreements --accept-source-agreements
+}
+if ($LASTEXITCODE -ne 0) {
+    Warn "winget failed — trying GitHub MSI installer..."
+    $arch = if ([Environment]::Is64BitOperatingSystem) { "x64" } else { "x86" }
+    # Fetch the latest release tag from GitHub API
+    try {
+        $latestRelease = (Invoke-RestMethod -Uri "https://api.github.com/repos/PowerShell/PowerShell/releases/latest" -UseBasicParsing).tag_name -replace '^v', ''
+        Log "Latest release: $latestRelease"
+    } catch {
+        $latestRelease = "7.5.1"
+        Warn "Could not query GitHub API — falling back to v$latestRelease"
+    }
+    $msiUrl = "https://github.com/PowerShell/PowerShell/releases/latest/download/PowerShell-$latestRelease-win-$arch.msi"
+    $msiPath = "$env:TEMP\pwsh-install.msi"
+    Log "Downloading from $msiUrl..."
+    Invoke-WebRequest -Uri $msiUrl -OutFile $msiPath -UseBasicParsing
+    Log "Running MSI installer..."
+    Start-Process msiexec.exe -ArgumentList "/i `"$msiPath`" /qn ADD_EXPLORER_CONTEXT_MENU_OPENPOWERSHELL=1 ADD_FILE_CONTEXT_MENU_RUNPOWERSHELL=1 ENABLE_PSREMOTING=0 REGISTER_MANIFEST=1 USE_MU=1 ENABLE_MU=1 ADD_PATH=1" -Wait
+    Remove-Item $msiPath -ErrorAction SilentlyContinue
+}
+# Refresh PATH
+$env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
 if (Get-Command pwsh -ErrorAction SilentlyContinue) {
     $pwshVer = (pwsh -NoProfile -Command '$PSVersionTable.PSVersion.ToString()') 2>$null
-    Ok "PowerShell $pwshVer already installed"
+    Ok "PowerShell $pwshVer (latest)"
 } else {
-    Log "Installing PowerShell 7 via winget..."
-    winget install --id Microsoft.PowerShell --source winget --accept-package-agreements --accept-source-agreements
-    if ($LASTEXITCODE -ne 0) {
-        Warn "winget install failed — trying MSI installer..."
-        $arch = if ([Environment]::Is64BitOperatingSystem) { "x64" } else { "x86" }
-        $msiUrl = "https://github.com/PowerShell/PowerShell/releases/latest/download/PowerShell-7.5.1-win-$arch.msi"
-        $msiPath = "$env:TEMP\pwsh-install.msi"
-        Log "Downloading from $msiUrl..."
-        Invoke-WebRequest -Uri $msiUrl -OutFile $msiPath -UseBasicParsing
-        Log "Running MSI installer..."
-        Start-Process msiexec.exe -ArgumentList "/i `"$msiPath`" /qn ADD_EXPLORER_CONTEXT_MENU_OPENPOWERSHELL=1 ADD_FILE_CONTEXT_MENU_RUNPOWERSHELL=1 ENABLE_PSREMOTING=0 REGISTER_MANIFEST=1 USE_MU=1 ENABLE_MU=1 ADD_PATH=1" -Wait
-        Remove-Item $msiPath -ErrorAction SilentlyContinue
+    Warn "PowerShell 7 installed — restart your terminal and re-run to use pwsh"
+}
+
+# ── WSL ──────────────────────────────────────────────────────────────────────
+Section "Windows Subsystem for Linux"
+$wslFeature = Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux -ErrorAction SilentlyContinue
+$vmPlatform = Get-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -ErrorAction SilentlyContinue
+
+if ($wslFeature.State -eq 'Enabled' -and $vmPlatform.State -eq 'Enabled') {
+    Ok "WSL and Virtual Machine Platform already enabled"
+    if (Get-Command wsl -ErrorAction SilentlyContinue) {
+        $wslVer = (wsl --version 2>$null | Select-Object -First 1)
+        if ($wslVer) { Ok "$wslVer" }
     }
-    # Refresh PATH
-    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
-    if (Get-Command pwsh -ErrorAction SilentlyContinue) {
-        $pwshVer = (pwsh -NoProfile -Command '$PSVersionTable.PSVersion.ToString()') 2>$null
-        Ok "PowerShell $pwshVer installed"
+} else {
+    Log "Enabling WSL and Virtual Machine Platform features..."
+    $needsReboot = $false
+
+    if ($wslFeature.State -ne 'Enabled') {
+        Log "Enabling Microsoft-Windows-Subsystem-Linux..."
+        Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux -NoRestart | Out-Null
+        $needsReboot = $true
+    }
+
+    if ($vmPlatform.State -ne 'Enabled') {
+        Log "Enabling VirtualMachinePlatform..."
+        Enable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -NoRestart | Out-Null
+        $needsReboot = $true
+    }
+
+    Log "Setting WSL default version to 2..."
+    wsl --set-default-version 2 2>$null
+
+    Log "Updating WSL kernel..."
+    wsl --update 2>$null
+
+    if ($needsReboot) {
+        Warn "WSL enabled — a REBOOT is required to finish setup"
     } else {
-        Warn "PowerShell 7 installed — restart your terminal and re-run to use pwsh"
+        Ok "WSL features enabled"
+    }
+}
+
+# ── VS Code ─────────────────────────────────────────────────────────────────
+Section "Visual Studio Code"
+if (Get-Command code -ErrorAction SilentlyContinue) {
+    $codeVer = (code --version 2>$null | Select-Object -First 1)
+    Ok "VS Code $codeVer already installed"
+} else {
+    Log "Installing Visual Studio Code..."
+    winget install --id Microsoft.VisualStudioCode --source winget --accept-package-agreements --accept-source-agreements
+    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+    if (Get-Command code -ErrorAction SilentlyContinue) {
+        $codeVer = (code --version 2>$null | Select-Object -First 1)
+        Ok "VS Code $codeVer installed"
+    } else {
+        Warn "VS Code installed — restart terminal to use 'code' command"
+    }
+}
+
+# ── Oh My Posh ──────────────────────────────────────────────────────────────
+Section "Oh My Posh"
+if (Get-Command oh-my-posh -ErrorAction SilentlyContinue) {
+    Ok "Oh My Posh $(oh-my-posh --version) already installed"
+} else {
+    Log "Installing Oh My Posh..."
+    winget install --id JanDeDobbeleer.OhMyPosh --source winget --accept-package-agreements --accept-source-agreements
+    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+    if (Get-Command oh-my-posh -ErrorAction SilentlyContinue) {
+        Ok "Oh My Posh $(oh-my-posh --version) installed"
+    } else {
+        Warn "Oh My Posh installed — restart terminal to use"
+    }
+}
+
+# Install a Nerd Font for Oh My Posh icons
+if (Get-Command oh-my-posh -ErrorAction SilentlyContinue) {
+    Log "Installing Meslo Nerd Font (recommended for Oh My Posh)..."
+    try {
+        oh-my-posh font install Meslo 2>$null
+        Ok "Meslo Nerd Font installed — set it as your terminal font"
+    } catch {
+        Warn "Font install skipped — run 'oh-my-posh font install Meslo' manually"
     }
 }
 
@@ -288,6 +378,11 @@ if (Test-Path $pyenvBin) { $env:Path = "$pyenvBin;$pyenvShims;$env:Path" }
 $localTools = Join-Path $HOME "local\tools"
 if (Test-Path $localTools) { $env:Path = "$localTools;$env:Path" }
 
+# Oh My Posh
+if (Get-Command oh-my-posh -ErrorAction SilentlyContinue) {
+    oh-my-posh init pwsh | Invoke-Expression
+}
+
 # Aliases
 Set-Alias -Name gohome -Value { Set-Location ~ }
 function yolo { claude --dangerously-skip-permissions @args }
@@ -326,7 +421,9 @@ Write-Host @"
 Write-Host "  Next steps:" -ForegroundColor White
 Write-Host "  1." -ForegroundColor DarkGray -NoNewline; Write-Host "  Restart your terminal (or run: . `$PROFILE)"
 Write-Host "  2." -ForegroundColor DarkGray -NoNewline; Write-Host "  gh auth login"
-Write-Host "  3." -ForegroundColor DarkGray -NoNewline; Write-Host "  Consider running from pwsh (PowerShell 7) going forward"
+Write-Host "  3." -ForegroundColor DarkGray -NoNewline; Write-Host "  Set terminal font to 'MesloLGM Nerd Font' for Oh My Posh icons"
+Write-Host "  4." -ForegroundColor DarkGray -NoNewline; Write-Host "  wsl --install Ubuntu  (if WSL distro not yet installed)"
+Write-Host "  5." -ForegroundColor DarkGray -NoNewline; Write-Host "  Consider running from pwsh (PowerShell 7) going forward"
 Write-Host ""
 Write-Host "  Finished: $(Get-Date -Format 'HH:mm')" -ForegroundColor DarkGray
 Write-Host ""

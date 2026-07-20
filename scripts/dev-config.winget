@@ -58,15 +58,12 @@ resources:
       Write-Host "  HKCU:\...\RunOnce\DSCConfigureResume = $resumeCmd"
       Write-Host "RebootForVmp: rebooting to activate Virtual Machine Platform..."
 
-      # Use shutdown.exe /f (force-close apps) instead of Restart-Computer -Force.
-      # Restart-Computer -Force still shows the interactive "These apps are
-      # preventing you from restarting — Restart anyway" screen (60s countdown +
-      # Enter/click) when other apps are open. `shutdown /r /f /t 10` closes apps
-      # without that prompt, so the reboot is fully non-interactive. RunOnce
-      # resumes the configuration automatically at next login.
-      Start-Process -FilePath 'shutdown.exe' `
-        -ArgumentList '/r','/f','/t','10','/c','Rebooting to activate WSL Virtual Machine Platform. Setup resumes automatically at login.' `
-        -WindowStyle Hidden
+      # Reboot fully non-interactively. Restart-Computer -Force still shows the
+      # interactive "These apps are preventing you from restarting" screen (60s
+      # countdown + Enter/click) when apps are open. `shutdown /r /f /t 0`
+      # force-closes apps and reboots immediately with no countdown, dialog, or
+      # keypress. The RunOnce key (set above) resumes the configuration at login.
+      shutdown.exe /r /f /t 0
 
       # shutdown.exe returns immediately after scheduling the reboot. Without an
       # explicit failure here DSC would consider this resource succeeded and try

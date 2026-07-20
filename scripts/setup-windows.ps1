@@ -427,6 +427,16 @@ if (Get-Command node -ErrorAction SilentlyContinue) {
     if (Get-Command claude -ErrorAction SilentlyContinue) {
         Ok "Claude Code $(claude --version 2>&1 | Select-Object -First 1)"
     }
+
+    if (Get-Command copilot -ErrorAction SilentlyContinue) {
+        Warn "GitHub Copilot CLI already installed — skipping"
+    } else {
+        Log "Installing GitHub Copilot CLI..."
+        npm install -g @github/copilot --silent
+    }
+    if (Get-Command copilot -ErrorAction SilentlyContinue) {
+        Ok "GitHub Copilot CLI $(copilot --version 2>&1 | Select-Object -First 1)"
+    }
 } else {
     Warn "Node.js not available yet — skipping npm global installs (restart and re-run)"
 }

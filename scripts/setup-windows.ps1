@@ -513,6 +513,30 @@ foreach ($prof in $profiles) {
     Ok "$prof updated"
 }
 
+# ── Windows Settings, Terminal & WSL Distro (winget configure) ────────────────
+# Runs LAST: the WSL distro step reboots the machine to activate Virtual Machine
+# Platform, then a RunOnce key resumes `winget configure` on next login to finish
+# installing Ubuntu. Anything after this point would not run before that reboot.
+Section "Windows Settings + Terminal + WSL Distro"
+$devConfig = Join-Path $PSScriptRoot "dev-config.winget"
+if (-not (Test-Path $devConfig)) {
+    Warn "dev-config.winget not found next to this script — skipping"
+} elseif (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+    Warn "winget not available — skipping Windows settings / WSL distro configuration"
+} else {
+    Log "Enabling winget configuration feature..."
+    winget configure --enable 2>$null
+    Warn "Applying OS settings, Terminal, fonts, extra tools, and installing Ubuntu."
+    Warn "The machine WILL REBOOT to finish WSL — it resumes automatically at login."
+    Log "Running winget configure (this may take a while)..."
+    winget configure -f $devConfig --accept-configuration-agreements --disable-interactivity
+    if ($LASTEXITCODE -eq 0) {
+        Ok "Windows settings and WSL distro configuration applied"
+    } else {
+        Warn "winget configure exited with code $LASTEXITCODE — review the output above"
+    }
+}
+
 # ── Done ─────────────────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host @"

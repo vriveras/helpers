@@ -243,6 +243,14 @@ else
 fi
 ok "Claude Code $(claude --version 2>&1 | head -1)"
 
+if command -v copilot &>/dev/null; then
+    warn "GitHub Copilot CLI already installed — skipping"
+else
+    log "Installing GitHub Copilot CLI..."
+    npm install -g @github/copilot -q
+fi
+ok "GitHub Copilot CLI $(copilot --version 2>&1 | head -1)"
+
 # ── Git Configuration ─────────────────────────────────────────────────────────
 section "Git"
 log "Setting up git tree alias..."

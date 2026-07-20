@@ -47,7 +47,7 @@ resources:
       # ${WinGetConfigRoot} is set by winget configure to the directory
       # containing the config file being applied.
       $configFile = "${WinGetConfigRoot}\dev-config.winget"
-      $resumeCmd  = "winget configure --file `"$configFile`" --accept-configuration-agreements"
+      $resumeCmd  = "winget configure --file `"$configFile`" --accept-configuration-agreements --disable-interactivity"
 
       # RunOnce entries are deleted by Windows automatically before they
       # are executed, so no cleanup step is needed in this config.
@@ -56,17 +56,25 @@ resources:
 
       Write-Host "RebootForVmp: registered RunOnce resume key."
       Write-Host "  HKCU:\...\RunOnce\DSCConfigureResume = $resumeCmd"
-      Write-Host "RebootForVmp: rebooting now to activate Virtual Machine Platform..."
-      Restart-Computer -Force
+      Write-Host "RebootForVmp: rebooting to activate Virtual Machine Platform..."
 
-      # Restart-Computer -Force returns immediately after signalling the OS
-      # to reboot — it does not block until the machine goes down. Without
-      # an explicit failure here DSC would consider this resource succeeded
-      # and attempt to run InstallUbuntu before the reboot happens.
-      # Throwing forces DSC to mark the current run as failed; the RunOnce
-      # key handles resuming on the next login.
-      Start-Sleep -Seconds 60   # give the OS time to initiate shutdown
-      throw "Reboot initiated to activate Virtual Machine Platform. DSC will resume via RunOnce on next login."
+      # Use shutdown.exe /f (force-close apps) instead of Restart-Computer -Force.
+      # Restart-Computer -Force still shows the interactive "These apps are
+      # preventing you from restarting — Restart anyway" screen (60s countdown +
+      # Enter/click) when other apps are open. `shutdown /r /f /t 10` closes apps
+      # without that prompt, so the reboot is fully non-interactive. RunOnce
+      # resumes the configuration automatically at next login.
+      Start-Process -FilePath 'shutdown.exe' `
+        -ArgumentList '/r','/f','/t','10','/c','Rebooting to activate WSL Virtual Machine Platform. Setup resumes automatically at login.' `
+        -WindowStyle Hidden
+
+      # shutdown.exe returns immediately after scheduling the reboot. Without an
+      # explicit failure here DSC would consider this resource succeeded and try
+      # to run InstallUbuntu before the reboot happens. Throwing forces DSC to
+      # mark the current run as failed; the RunOnce key handles resuming on the
+      # next login.
+      Start-Sleep -Seconds 30   # give the OS time to initiate shutdown
+      throw "Reboot scheduled to activate Virtual Machine Platform. DSC will resume via RunOnce on next login."
   metadata:
     securityContext: elevated
 

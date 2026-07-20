@@ -578,7 +578,9 @@ Write-Host "  Next steps:" -ForegroundColor White
 Write-Host "  1." -ForegroundColor DarkGray -NoNewline; Write-Host "  Restart your terminal (or run: . `$PROFILE)"
 Write-Host "  2." -ForegroundColor DarkGray -NoNewline; Write-Host "  gh auth login"
 Write-Host "  3." -ForegroundColor DarkGray -NoNewline; Write-Host "  Set terminal font to 'MesloLGM Nerd Font' for Oh My Posh icons"
-Write-Host "  4." -ForegroundColor DarkGray -NoNewline; Write-Host "  wsl --install Ubuntu  (if WSL distro not yet installed)"
+Write-Host "  4." -ForegroundColor DarkGray -NoNewline; Write-Host "  Configure the WSL / Linux shell (Ubuntu was installed above):"
+Write-Host "       " -NoNewline; Write-Host "wsl -d Ubuntu   " -ForegroundColor Cyan -NoNewline; Write-Host "(first launch — create your Linux user)"
+Write-Host "       " -NoNewline; Write-Host "then inside Ubuntu run: " -NoNewline; Write-Host "bash ~/local/sources/helpers/scripts/setup-wsl.sh" -ForegroundColor Cyan
 Write-Host "  5." -ForegroundColor DarkGray -NoNewline; Write-Host "  Consider running from pwsh (PowerShell 7) going forward"
 Write-Host ""
 Write-Host "  Log file: $logFile" -ForegroundColor DarkGray

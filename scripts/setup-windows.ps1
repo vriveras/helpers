@@ -64,12 +64,12 @@ $pwshNeedsWork = $true
 
 if ($pwshInstalled) {
     Log "Upgrading PowerShell 7 via winget..."
-    winget upgrade --id Microsoft.PowerShell --source winget --accept-package-agreements --accept-source-agreements 2>$null
+    winget upgrade --id Microsoft.PowerShell --source winget --accept-package-agreements --accept-source-agreements --silent --disable-interactivity 2>$null
     # Exit code 0 = upgraded, -1978335189 (0x8A150013) = no update available — both are fine
     if ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq -1978335189) { $pwshNeedsWork = $false }
 } else {
     Log "Installing PowerShell 7 via winget..."
-    winget install --id Microsoft.PowerShell --source winget --accept-package-agreements --accept-source-agreements
+    winget install --id Microsoft.PowerShell --source winget --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
     if ($LASTEXITCODE -eq 0) { $pwshNeedsWork = $false }
 }
 
@@ -159,7 +159,7 @@ if (Get-Command code -ErrorAction SilentlyContinue) {
     Ok "VS Code $codeVer already installed"
 } else {
     Log "Installing Visual Studio Code..."
-    winget install --id Microsoft.VisualStudioCode --source winget --accept-package-agreements --accept-source-agreements
+    winget install --id Microsoft.VisualStudioCode --source winget --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
     if (Get-Command code -ErrorAction SilentlyContinue) {
         $codeVer = (code --version 2>$null | Select-Object -First 1)
@@ -242,7 +242,7 @@ if (Get-Command oh-my-posh -ErrorAction SilentlyContinue) {
     Ok "Oh My Posh $(oh-my-posh --version) already installed"
 } else {
     Log "Installing Oh My Posh..."
-    winget install --id JanDeDobbeleer.OhMyPosh --source winget --accept-package-agreements --accept-source-agreements
+    winget install --id JanDeDobbeleer.OhMyPosh --source winget --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
     if (Get-Command oh-my-posh -ErrorAction SilentlyContinue) {
         Ok "Oh My Posh $(oh-my-posh --version) installed"
@@ -278,7 +278,7 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
     Ok "git $(git --version)"
 } else {
     Log "Installing Git..."
-    winget install --id Git.Git --source winget --accept-package-agreements --accept-source-agreements
+    winget install --id Git.Git --source winget --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
     Ok "git $(git --version)"
 }
@@ -293,7 +293,7 @@ if (Get-Command gh -ErrorAction SilentlyContinue) {
     Ok "$(gh --version | Select-Object -First 1)"
 } else {
     Log "Installing GitHub CLI..."
-    winget install --id GitHub.cli --source winget --accept-package-agreements --accept-source-agreements
+    winget install --id GitHub.cli --source winget --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
     Ok "$(gh --version | Select-Object -First 1)"
 }
@@ -331,7 +331,7 @@ if (Get-Command fnm -ErrorAction SilentlyContinue) {
     Ok "fnm already installed"
 } else {
     Log "Installing fnm (Fast Node Manager)..."
-    winget install --id Schniz.fnm --source winget --accept-package-agreements --accept-source-agreements
+    winget install --id Schniz.fnm --source winget --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
 }
 
@@ -353,7 +353,7 @@ if (Get-Command bun -ErrorAction SilentlyContinue) {
     Ok "Bun $(bun --version) already installed"
 } else {
     Log "Installing Bun via winget..."
-    winget install --id Oven-sh.Bun --source winget --accept-package-agreements --accept-source-agreements
+    winget install --id Oven-sh.Bun --source winget --accept-package-agreements --accept-source-agreements --silent --disable-interactivity
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
     if (Get-Command bun -ErrorAction SilentlyContinue) {
         Ok "Bun $(bun --version)"

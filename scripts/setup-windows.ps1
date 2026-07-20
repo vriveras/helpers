@@ -103,10 +103,21 @@ if (Get-Command pwsh -ErrorAction SilentlyContinue) {
 
 # ── WSL ──────────────────────────────────────────────────────────────────────
 Section "Windows Subsystem for Linux"
-$wslFeature = Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux -ErrorAction SilentlyContinue
-$vmPlatform = Get-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -ErrorAction SilentlyContinue
+# Query feature state via dism.exe — the DISM PowerShell cmdlets throw
+# "Class not registered" when run under PowerShell 7 (they are Windows
+# PowerShell-only and their COM class fails to load in the Core runtime).
+function Get-FeatureState {
+    param([string]$FeatureName)
+    $line = dism.exe /Online /Get-FeatureInfo /FeatureName:$FeatureName 2>$null |
+        Select-String -Pattern '^State\s*:\s*(.+)$'
+    if ($line) { return $line.Matches[0].Groups[1].Value.Trim() }
+    return $null
+}
 
-if ($wslFeature.State -eq 'Enabled' -and $vmPlatform.State -eq 'Enabled') {
+$wslState = Get-FeatureState 'Microsoft-Windows-Subsystem-Linux'
+$vmState  = Get-FeatureState 'VirtualMachinePlatform'
+
+if ($wslState -eq 'Enabled' -and $vmState -eq 'Enabled') {
     Ok "WSL and Virtual Machine Platform already enabled"
     if (Get-Command wsl -ErrorAction SilentlyContinue) {
         $wslVer = (wsl --version 2>$null | Select-Object -First 1)
@@ -116,15 +127,15 @@ if ($wslFeature.State -eq 'Enabled' -and $vmPlatform.State -eq 'Enabled') {
     Log "Enabling WSL and Virtual Machine Platform features..."
     $needsReboot = $false
 
-    if ($wslFeature.State -ne 'Enabled') {
+    if ($wslState -ne 'Enabled') {
         Log "Enabling Microsoft-Windows-Subsystem-Linux..."
-        Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux -NoRestart | Out-Null
+        dism.exe /Online /Enable-Feature /FeatureName:Microsoft-Windows-Subsystem-Linux /All /NoRestart | Out-Null
         $needsReboot = $true
     }
 
-    if ($vmPlatform.State -ne 'Enabled') {
+    if ($vmState -ne 'Enabled') {
         Log "Enabling VirtualMachinePlatform..."
-        Enable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -NoRestart | Out-Null
+        dism.exe /Online /Enable-Feature /FeatureName:VirtualMachinePlatform /All /NoRestart | Out-Null
         $needsReboot = $true
     }
 

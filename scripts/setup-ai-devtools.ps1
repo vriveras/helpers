@@ -302,7 +302,7 @@ if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
 
     # Verify PyTorch + CUDA
     Log "Verifying PyTorch CUDA availability..."
-    $torchCheck = python -c "import torch; print(f'PyTorch {torch.__version__}, CUDA available: {torch.cuda.is_available()}, Device: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else \"N/A\"}')" 2>$null
+    $torchCheck = python -c "import torch; avail = torch.cuda.is_available(); dev = torch.cuda.get_device_name(0) if avail else 'N/A'; print('PyTorch ' + torch.__version__ + ', CUDA available: ' + str(avail) + ', Device: ' + dev)" 2>$null
     if ($torchCheck) {
         Ok $torchCheck
     } else {
@@ -328,39 +328,39 @@ if (-not $wslAvailable) {
     if (-not $ubuntuInstalled) {
         Warn "Ubuntu not found in WSL — install with: wsl --install -d Ubuntu"
     } else {
-        # Check if the AI WSL script exists
-        $wslScriptPath = "~/local/sources/helpers/scripts/setup-ai-wsl.sh"
-        $scriptExists = wsl -d $ubuntuDistro -- test -f $wslScriptPath 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            Log "Found setup-ai-wsl.sh in WSL — invoking..."
-            wsl -d $ubuntuDistro -- bash $wslScriptPath
+        # Determine the WSL script path — prefer the Windows repo path converted via wslpath
+        $windowsWslScript = Join-Path $ScriptDir "setup-ai-wsl.sh"
+        if (-not (Test-Path $windowsWslScript)) {
+            # ScriptDir might be temp (iex mode) or repo root — check both
+            $repoWslScript = Join-Path (Split-Path $ScriptDir -Parent) "scripts\setup-ai-wsl.sh"
+            if (Test-Path $repoWslScript) { $windowsWslScript = $repoWslScript }
+        }
+
+        if (Test-Path $windowsWslScript) {
+            # Convert Windows path to WSL path
+            $winPathForWsl = $windowsWslScript -replace '\\', '/'
+            $wslScriptResolved = (wsl -d $ubuntuDistro -- wslpath -u "$winPathForWsl" 2>$null)
+            if ($LASTEXITCODE -ne 0 -or -not $wslScriptResolved) {
+                # Fallback: construct /mnt/c/... path manually
+                $driveLetter = $windowsWslScript.Substring(0, 1).ToLower()
+                $remainder = $windowsWslScript.Substring(2) -replace '\\', '/'
+                $wslScriptResolved = "/mnt/$driveLetter$remainder"
+            }
+            $wslScriptResolved = $wslScriptResolved.Trim()
+            Log "Running setup-ai-wsl.sh via WSL (path: $wslScriptResolved)..."
+            # Use sed to strip any CRLF, pipe to bash --login to ensure PATH is set
+            wsl -d $ubuntuDistro -- bash --login -c "sed 's/\r$//' '$wslScriptResolved' | bash --login"
             if ($LASTEXITCODE -eq 0) {
                 Ok "WSL AI setup completed successfully"
             } else {
                 Warn "WSL AI setup exited with code $LASTEXITCODE — check output above"
             }
         } else {
-            # For iex mode, try to copy the downloaded script
-            $localWslScript = Join-Path $ScriptDir "setup-ai-wsl.sh"
-            if (Test-Path $localWslScript) {
-                Log "Copying setup-ai-wsl.sh into WSL..."
-                wsl -d $ubuntuDistro -- mkdir -p '~/local/sources/helpers/scripts' 2>$null
-                $wslTempPath = "/tmp/setup-ai-wsl.sh"
-                Get-Content $localWslScript -Raw | wsl -d $ubuntuDistro -- bash -c "cat > $wslTempPath && chmod +x $wslTempPath && cp $wslTempPath ~/local/sources/helpers/scripts/setup-ai-wsl.sh"
-                Log "Running setup-ai-wsl.sh..."
-                wsl -d $ubuntuDistro -- bash $wslScriptPath
-                if ($LASTEXITCODE -eq 0) {
-                    Ok "WSL AI setup completed successfully"
-                } else {
-                    Warn "WSL AI setup exited with code $LASTEXITCODE"
-                }
-            } else {
-                Warn "setup-ai-wsl.sh not found in WSL"
-                Warn "Clone the helpers repo inside WSL:"
-                Warn "  wsl -d Ubuntu"
-                Warn "  git clone https://github.com/vriveras/helpers ~/local/sources/helpers"
-                Warn "  bash ~/local/sources/helpers/scripts/setup-ai-wsl.sh"
-            }
+            Warn "setup-ai-wsl.sh not found"
+            Warn "Clone the helpers repo inside WSL:"
+            Warn "  wsl -d Ubuntu"
+            Warn "  git clone https://github.com/vriveras/helpers ~/local/sources/helpers"
+            Warn "  bash ~/local/sources/helpers/scripts/setup-ai-wsl.sh"
         }
     }
 }

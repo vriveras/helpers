@@ -2,14 +2,14 @@
 #
 # This is a trimmed fork of microsoft/WindowsDeveloperConfig's dev-config.winget.
 # Everything setup-windows.ps1 already installs (PowerShell 7, Git, GitHub CLI,
-# VS Code, .NET SDK, Oh My Posh, Node via fnm, Python via pyenv, and enabling the
-# WSL optional features) has been removed to avoid duplication and tool conflicts.
+# VS Code, .NET SDK, Oh My Posh, Node via fnm, Python via pyenv) has been removed
+# to avoid duplication and tool conflicts.
 #
 # What remains is purely additive: Windows OS/Explorer/taskbar settings, Windows
 # Terminal + Cascadia Nerd Fonts + default profile, extra tools (PowerToys,
-# Coreutils, uv, winappcli), and the WSL Ubuntu distro install (with the reboot +
-# RunOnce resume). WSL *feature enabling* is done by setup-windows.ps1 (dism);
-# this config only reboots to activate VMP and then installs Ubuntu.
+# Coreutils, uv, winappcli), and the full WSL lifecycle (enabling optional
+# features, rebooting to activate VMP, then installing the Ubuntu distro via
+# RunOnce resume on next login).
 #
 # Apply with:
 #   winget configure -f dev-config.winget --accept-configuration-agreements --disable-interactivity
@@ -22,28 +22,41 @@ metadata:
 resources:
 
 # ---------------------------------------------------------------------------
-# WSL Phase 1 — Reboot so Virtual Machine Platform takes effect
-#   (setup-windows.ps1 enables the WSL/VMP optional features via dism; this
-#    resource performs the reboot required to activate them, then resumes via
-#    RunOnce on next login.)
+# WSL Phase 1 — Enable optional features (WSL + VMP) and reboot
+#   (This resource handles the full WSL feature lifecycle: enabling both
+#    Microsoft-Windows-Subsystem-Linux and VirtualMachinePlatform via dism,
+#    then rebooting to activate them. A RunOnce key resumes winget configure
+#    on next login.)
 # ---------------------------------------------------------------------------
 
-- name: RebootForVmp
+- name: EnableWslAndReboot
   type: Microsoft.DSC.Transitional/WindowsPowerShellScript
   properties:
     getScript: |
-      # Get-CimInstance returns $null without error when the service doesn't
-      # exist (unlike Get-Service, which sets HadErrors at the hosting layer
-      # even with -ErrorAction Ignore or try/catch).
+      $wsl = [bool](dism.exe /Online /Get-FeatureInfo /FeatureName:Microsoft-Windows-Subsystem-Linux 2>$null |
+        Select-String '^State\s*:\s*Enabled')
+      $vmp = [bool](dism.exe /Online /Get-FeatureInfo /FeatureName:VirtualMachinePlatform 2>$null |
+        Select-String '^State\s*:\s*Enabled')
       $svc = Get-CimInstance -ClassName Win32_Service -Filter "Name='vmcompute'"
-      return @{ vmcomputePresent = [bool]$svc }
+      return @{ wslFeatureEnabled = $wsl; vmpFeatureEnabled = $vmp; vmcomputePresent = [bool]$svc }
     testScript: |
-      # vmcompute (Hyper-V Host Compute Service) is registered once Virtual
-      # Machine Platform is active post-reboot. Presence alone is sufficient
-      # — no need to check if it is running.
+      # Both optional features enabled AND vmcompute service registered (post-reboot)
+      $wsl = (dism.exe /Online /Get-FeatureInfo /FeatureName:Microsoft-Windows-Subsystem-Linux 2>$null |
+        Select-String '^State\s*:\s*Enabled')
+      $vmp = (dism.exe /Online /Get-FeatureInfo /FeatureName:VirtualMachinePlatform 2>$null |
+        Select-String '^State\s*:\s*Enabled')
       $svc = Get-CimInstance -ClassName Win32_Service -Filter "Name='vmcompute'"
-      return [bool]$svc
+      return ([bool]$wsl -and [bool]$vmp -and [bool]$svc)
     setScript: |
+      # Enable WSL and Virtual Machine Platform optional features
+      Write-Host "EnableWslAndReboot: Enabling Microsoft-Windows-Subsystem-Linux..."
+      dism.exe /Online /Enable-Feature /FeatureName:Microsoft-Windows-Subsystem-Linux /All /NoRestart | Out-Null
+      Write-Host "EnableWslAndReboot: Enabling VirtualMachinePlatform..."
+      dism.exe /Online /Enable-Feature /FeatureName:VirtualMachinePlatform /All /NoRestart | Out-Null
+
+      # Set WSL default version to 2
+      wsl --set-default-version 2 2>$null
+
       # ${WinGetConfigRoot} is set by winget configure to the directory
       # containing the config file being applied.
       $configFile = "${WinGetConfigRoot}\dev-config.winget"
@@ -54,9 +67,9 @@ resources:
       $runOncePath = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce'
       Set-ItemProperty -Path $runOncePath -Name 'DSCConfigureResume' -Value $resumeCmd -Force
 
-      Write-Host "RebootForVmp: registered RunOnce resume key."
+      Write-Host "EnableWslAndReboot: registered RunOnce resume key."
       Write-Host "  HKCU:\...\RunOnce\DSCConfigureResume = $resumeCmd"
-      Write-Host "RebootForVmp: rebooting to activate Virtual Machine Platform..."
+      Write-Host "EnableWslAndReboot: rebooting to activate Virtual Machine Platform..."
 
       # Reboot fully non-interactively. Restart-Computer -Force still shows the
       # interactive "These apps are preventing you from restarting" screen (60s
@@ -82,7 +95,7 @@ resources:
 - name: InstallUbuntu
   type: Microsoft.DSC.Transitional/WindowsPowerShellScript
   dependsOn:
-    - RebootForVmp
+    - EnableWslAndReboot
   properties:
     getScript: |
       # Run wsl --list via Start-Process with redirected output. Calling wsl.exe

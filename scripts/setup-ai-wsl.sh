@@ -89,29 +89,66 @@ if command -v nvcc &>/dev/null; then
 else
     log "Installing CUDA Toolkit from NVIDIA repository..."
 
-    # Detect Ubuntu version
-    UBUNTU_VER=$(lsb_release -rs | tr -d '.')
-    DISTRO="ubuntu${UBUNTU_VER}"
+    # Detect Ubuntu version and map to nearest NVIDIA-supported repo
+    UBUNTU_VER_RAW=$(lsb_release -rs)
+    UBUNTU_VER=$(echo "$UBUNTU_VER_RAW" | tr -d '.')
     ARCH="x86_64"
 
-    log "Detected distro: ${DISTRO} (${ARCH})"
+    # NVIDIA CUDA repos exist for specific Ubuntu versions.
+    # Map to the nearest supported version if the exact one isn't available.
+    SUPPORTED_DISTROS="2404 2204 2004"
+    DISTRO=""
+    for supported in $SUPPORTED_DISTROS; do
+        if [ "$UBUNTU_VER" = "$supported" ]; then
+            DISTRO="ubuntu${supported}"
+            break
+        fi
+    done
+    # If no exact match, use the highest supported version that's <= current
+    if [ -z "$DISTRO" ]; then
+        for supported in $SUPPORTED_DISTROS; do
+            if [ "$UBUNTU_VER" -ge "$supported" ] 2>/dev/null; then
+                DISTRO="ubuntu${supported}"
+                log "Ubuntu ${UBUNTU_VER_RAW} not in NVIDIA repos — using ${DISTRO} (nearest compatible)"
+                break
+            fi
+        done
+    fi
+    # Final fallback
+    if [ -z "$DISTRO" ]; then
+        DISTRO="ubuntu2404"
+        warn "Could not determine NVIDIA repo — falling back to ${DISTRO}"
+    fi
+
+    log "Using NVIDIA repo: ${DISTRO} (${ARCH})"
 
     # Add NVIDIA package repository
-    wget -q "https://developer.download.nvidia.com/compute/cuda/repos/${DISTRO}/${ARCH}/cuda-keyring_1.1-1_all.deb" -O /tmp/cuda-keyring.deb
-    sudo dpkg -i /tmp/cuda-keyring.deb
-    rm -f /tmp/cuda-keyring.deb
-    sudo apt-get update -y -q
+    KEYRING_URL="https://developer.download.nvidia.com/compute/cuda/repos/${DISTRO}/${ARCH}/cuda-keyring_1.1-1_all.deb"
+    if ! wget -q "$KEYRING_URL" -O /tmp/cuda-keyring.deb; then
+        warn "Failed to download CUDA keyring from ${KEYRING_URL}"
+        warn "Install CUDA toolkit manually: https://developer.nvidia.com/cuda-downloads"
+    else
+        sudo dpkg -i /tmp/cuda-keyring.deb
+        rm -f /tmp/cuda-keyring.deb
+        sudo apt-get update -y -q
 
-    # Install CUDA toolkit 12.6
-    log "Installing cuda-toolkit-12-6 (this may take a while)..."
-    sudo apt-get install -y -q cuda-toolkit-12-6
+        # Install CUDA toolkit (use meta-package that matches the driver's supported version)
+        log "Installing cuda-toolkit (this may take a while)..."
+        sudo apt-get install -y -q cuda-toolkit 2>/dev/null || sudo apt-get install -y -q cuda-toolkit-12-6 2>/dev/null || {
+            warn "cuda-toolkit install failed — try manually: sudo apt-get install cuda-toolkit"
+        }
 
-    export CUDA_HOME=/usr/local/cuda
-    export PATH=$CUDA_HOME/bin:$PATH
-    export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:${LD_LIBRARY_PATH:-}
+        export CUDA_HOME=/usr/local/cuda
+        export PATH=$CUDA_HOME/bin:$PATH
+        export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:${LD_LIBRARY_PATH:-}
 
-    NVCC_VER=$(nvcc --version | grep -oP 'release \K[0-9.]+')
-    ok "CUDA Toolkit installed: nvcc ${NVCC_VER}"
+        if command -v nvcc &>/dev/null; then
+            NVCC_VER=$(nvcc --version | grep -oP 'release \K[0-9.]+')
+            ok "CUDA Toolkit installed: nvcc ${NVCC_VER}"
+        else
+            warn "CUDA Toolkit installed but nvcc not found — may need to restart shell"
+        fi
+    fi
 fi
 
 # Add CUDA env vars to bashrc

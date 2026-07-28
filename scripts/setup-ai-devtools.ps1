@@ -1,0 +1,452 @@
+# AI Development Tools Setup Script (Windows + NVIDIA RTX 6000)
+# CUDA, cuDNN, PyTorch, Triton, and WSL AI environment
+
+# ── Self-elevate if not running as admin ─────────────────────────────────────
+if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-Host "  ⚠  Not running as Administrator — requesting elevation..." -ForegroundColor Yellow
+    $argList = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""
+    try {
+        Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList $argList -Verb RunAs
+    } catch {
+        Write-Host "  ✗  Elevation cancelled or failed. Please run as Administrator." -ForegroundColor Red
+        exit 1
+    }
+    exit 0
+}
+
+$ErrorActionPreference = 'Stop'
+
+# Resolve the directory this script lives in (robust against Invoke-Expression contexts)
+if ($PSScriptRoot) {
+    $ScriptDir = $PSScriptRoot
+} elseif ($PSCommandPath) {
+    $ScriptDir = Split-Path -Parent $PSCommandPath
+} else {
+    # Running via iex (no file on disk) — download companion files from GitHub
+    $ScriptDir = Join-Path $env:TEMP "helpers-setup-ai"
+    if (-not (Test-Path $ScriptDir)) { New-Item -ItemType Directory -Path $ScriptDir -Force | Out-Null }
+    $baseUrl = "https://raw.githubusercontent.com/vriveras/helpers/main/scripts"
+    Write-Host "  " -NoNewline; Write-Host "→" -ForegroundColor Blue -NoNewline; Write-Host " Running via Invoke-Expression — downloading companion files..."
+    try {
+        Invoke-WebRequest -Uri "$baseUrl/setup-ai-wsl.sh" -OutFile (Join-Path $ScriptDir "setup-ai-wsl.sh") -UseBasicParsing
+    } catch {
+        # Will handle missing WSL script later
+    }
+}
+
+# ── Log File ─────────────────────────────────────────────────────────────────
+$logDir = Join-Path $HOME "local\logs"
+if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
+$logFile = Join-Path $logDir "setup-ai-devtools_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
+Start-Transcript -Path $logFile -Append | Out-Null
+
+# Summary tracking
+$script:summary = [System.Collections.ArrayList]::new()
+function Add-Summary { param([string]$icon, [string]$section, [string]$msg) $script:summary.Add([PSCustomObject]@{ Icon=$icon; Section=$section; Message=$msg }) | Out-Null }
+
+# ── Colors / Helpers ─────────────────────────────────────────────────────────
+function Log     { param([string]$msg) Write-Host "  " -NoNewline; Write-Host "→" -ForegroundColor Blue -NoNewline; Write-Host " $msg" }
+function Ok      { param([string]$msg) Write-Host "  " -NoNewline; Write-Host "✓" -ForegroundColor Green -NoNewline; Write-Host " $msg"; Add-Summary "✓" $script:currentSection $msg }
+function Warn    { param([string]$msg) Write-Host "  " -NoNewline; Write-Host "⚠" -ForegroundColor Yellow -NoNewline; Write-Host "  $msg"; Add-Summary "⚠" $script:currentSection $msg }
+function Fail    { param([string]$msg) Write-Host "  " -NoNewline; Write-Host "✗" -ForegroundColor Red -NoNewline; Write-Host " $msg"; Add-Summary "✗" $script:currentSection $msg; exit 1 }
+function Section { param([string]$msg) Write-Host ""; Write-Host "┌─ $msg " -ForegroundColor Cyan -NoNewline; Write-Host "────────────────────────────────────────" -ForegroundColor DarkGray; $script:currentSection = $msg }
+
+# ── Banner ───────────────────────────────────────────────────────────────────
+Clear-Host
+Write-Host @"
+
+  ██╗   ██╗██████╗ ██╗██╗   ██╗███████╗██████╗  █████╗ ███████╗
+  ██║   ██║██╔══██╗██║██║   ██║██╔════╝██╔══██╗██╔══██╗██╔════╝
+  ██║   ██║██████╔╝██║██║   ██║█████╗  ██████╔╝███████║███████╗
+  ╚██╗ ██╔╝██╔══██╗██║╚██╗ ██╔╝██╔══╝  ██╔══██╗██╔══██║╚════██║
+   ╚████╔╝ ██║  ██║██║ ╚████╔╝ ███████╗██║  ██║██║  ██║███████║
+    ╚═══╝  ╚═╝  ╚═╝╚═╝  ╚═══╝  ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝
+
+              █████╗ ██╗    ██████╗ ███████╗██╗   ██╗
+             ██╔══██╗██║    ██╔══██╗██╔════╝██║   ██║
+             ███████║██║    ██║  ██║█████╗  ██║   ██║
+           · ██╔══██║██║    ██║  ██║██╔══╝  ╚██╗ ██╔╝
+             ██║  ██║██║    ██████╔╝███████╗ ╚████╔╝
+             ╚═╝  ╚═╝╚═╝    ╚═════╝ ╚══════╝  ╚═══╝
+
+"@ -ForegroundColor Cyan
+
+Write-Host "  Setting up Vicente's AI Development Environment" -ForegroundColor DarkGray
+Write-Host "  Windows · NVIDIA RTX 6000 · $(Get-Date -Format 'dddd, MMMM dd yyyy  HH:mm')" -ForegroundColor DarkGray
+Write-Host ""
+
+# ── NVIDIA GPU Detection ─────────────────────────────────────────────────────
+Section "NVIDIA GPU Detection"
+$nvidiaSmiAvailable = [bool](Get-Command nvidia-smi -ErrorAction SilentlyContinue)
+if ($nvidiaSmiAvailable) {
+    try {
+        $smiOutput = nvidia-smi --query-gpu=name,driver_version --format=csv,noheader 2>$null
+        if ($smiOutput) {
+            $parts = $smiOutput.Split(',').Trim()
+            $gpuName = $parts[0]
+            $driverVer = $parts[1]
+            Ok "GPU: $gpuName"
+            Ok "Driver: $driverVer"
+        }
+        $cudaVer = (nvidia-smi 2>$null | Select-String "CUDA Version:" | ForEach-Object { ($_ -split "CUDA Version:\s*")[1].Trim() })
+        if ($cudaVer) {
+            Ok "CUDA (driver-reported): $cudaVer"
+        }
+    } catch {
+        Warn "nvidia-smi found but failed to query GPU: $_"
+    }
+} else {
+    Warn "nvidia-smi not found — NVIDIA driver may not be installed yet"
+    Warn "Install the NVIDIA driver for RTX 6000 from https://www.nvidia.com/drivers/"
+}
+
+# ── NVIDIA GPU Driver ────────────────────────────────────────────────────────
+Section "NVIDIA GPU Driver"
+if ($nvidiaSmiAvailable) {
+    $driverInfo = nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>$null
+    if ($driverInfo) {
+        Ok "NVIDIA driver $($driverInfo.Trim()) active (workstation GPU — managed via NVIDIA Enterprise drivers or Windows Update)"
+    } else {
+        Warn "Could not query driver version"
+    }
+} else {
+    Warn "NVIDIA driver not detected — install from https://www.nvidia.com/drivers/ (select RTX 6000 / Ada Generation)"
+    Warn "After installing the driver, re-run this script"
+}
+
+# ── CUDA Toolkit ─────────────────────────────────────────────────────────────
+Section "CUDA Toolkit"
+$cudaInstalled = $false
+$cudaPath = $null
+
+# Check if CUDA is already installed
+if ($env:CUDA_PATH -and (Test-Path $env:CUDA_PATH)) {
+    $cudaPath = $env:CUDA_PATH
+    $cudaInstalled = $true
+} else {
+    # Search for CUDA installations
+    $cudaBase = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA"
+    if (Test-Path $cudaBase) {
+        $cudaVersions = Get-ChildItem -Path $cudaBase -Directory | Sort-Object Name -Descending
+        if ($cudaVersions) {
+            $cudaPath = $cudaVersions[0].FullName
+            $cudaInstalled = $true
+        }
+    }
+}
+
+if ($cudaInstalled) {
+    $nvccPath = Join-Path $cudaPath "bin\nvcc.exe"
+    if (Test-Path $nvccPath) {
+        $nvccVer = & $nvccPath --version 2>$null | Select-String "release" | ForEach-Object { ($_ -split "release\s+")[1].TrimEnd(',') }
+        Ok "CUDA Toolkit $nvccVer already installed at $cudaPath"
+    } else {
+        Ok "CUDA path found at $cudaPath (nvcc not in expected location)"
+    }
+} else {
+    Log "Installing CUDA Toolkit via winget..."
+    winget install --id Nvidia.CUDA --source winget --accept-package-agreements --accept-source-agreements --silent --disable-interactivity 2>$null
+    if ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq -1978335189) {
+        # Refresh environment and find CUDA
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+        $cudaBase = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA"
+        if (Test-Path $cudaBase) {
+            $cudaVersions = Get-ChildItem -Path $cudaBase -Directory | Sort-Object Name -Descending
+            if ($cudaVersions) {
+                $cudaPath = $cudaVersions[0].FullName
+                $env:CUDA_PATH = $cudaPath
+                [System.Environment]::SetEnvironmentVariable("CUDA_PATH", $cudaPath, "Machine")
+                $nvccPath = Join-Path $cudaPath "bin\nvcc.exe"
+                if (Test-Path $nvccPath) {
+                    $nvccVer = & $nvccPath --version 2>$null | Select-String "release" | ForEach-Object { ($_ -split "release\s+")[1].TrimEnd(',') }
+                    Ok "CUDA Toolkit $nvccVer installed at $cudaPath"
+                } else {
+                    Ok "CUDA Toolkit installed at $cudaPath"
+                }
+            }
+        } else {
+            Warn "CUDA installed but path not found — restart terminal and re-run"
+        }
+    } else {
+        Warn "CUDA Toolkit installation failed (winget exit code: $LASTEXITCODE)"
+        Warn "Try manually: winget install --id Nvidia.CUDA --source winget"
+    }
+}
+
+# ── cuDNN ────────────────────────────────────────────────────────────────────
+Section "cuDNN"
+$cudnnFound = $false
+
+if ($cudaPath) {
+    $cudnnDlls = Get-ChildItem -Path (Join-Path $cudaPath "bin") -Filter "cudnn*.dll" -ErrorAction SilentlyContinue
+    if ($cudnnDlls) {
+        $cudnnFound = $true
+        Ok "cuDNN libraries found in $cudaPath\bin ($($cudnnDlls.Count) DLLs)"
+    }
+}
+
+if (-not $cudnnFound) {
+    Log "Attempting cuDNN install via winget..."
+    winget install --id Nvidia.cuDNN --source winget --accept-package-agreements --accept-source-agreements --silent --disable-interactivity 2>$null
+    if ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq -1978335189) {
+        # Check again after install
+        if ($cudaPath) {
+            $cudnnDlls = Get-ChildItem -Path (Join-Path $cudaPath "bin") -Filter "cudnn*.dll" -ErrorAction SilentlyContinue
+            if ($cudnnDlls) {
+                Ok "cuDNN installed ($($cudnnDlls.Count) DLLs in CUDA bin)"
+            } else {
+                Warn "cuDNN package installed but DLLs not found in CUDA path — may need restart"
+            }
+        } else {
+            Warn "cuDNN installed but CUDA_PATH not set — restart terminal and verify"
+        }
+    } else {
+        Warn "cuDNN not available via winget and not found in CUDA path"
+        Warn "Download cuDNN from: https://developer.nvidia.com/cudnn"
+        Warn "Extract to: $cudaPath (copy bin/, include/, lib/ folders)"
+    }
+}
+
+# ── Python Environment ───────────────────────────────────────────────────────
+Section "Python Environment"
+$pyenvAvailable = [bool](Get-Command pyenv -ErrorAction SilentlyContinue)
+$pythonVersion = "3.11.9"
+
+if ($pyenvAvailable) {
+    # Check if target version is already installed
+    $installedVersions = pyenv versions 2>$null
+    if ($installedVersions -match $pythonVersion) {
+        Ok "Python $pythonVersion already installed via pyenv"
+    } else {
+        Log "Installing Python $pythonVersion via pyenv..."
+        pyenv install $pythonVersion 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            Ok "Python $pythonVersion installed via pyenv"
+        } else {
+            Warn "pyenv install failed — check pyenv-win installation"
+        }
+    }
+    Log "Setting pyenv global to $pythonVersion..."
+    pyenv global $pythonVersion 2>$null
+    pyenv rehash 2>$null
+    # Refresh PATH for pyenv shims
+    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+} else {
+    Warn "pyenv-win not found — run setup-windows.ps1 first to install pyenv-win"
+    Warn "Checking for system Python as fallback..."
+}
+
+# Verify Python
+if (Get-Command python -ErrorAction SilentlyContinue) {
+    $pyVer = python --version 2>$null
+    Ok "$pyVer available"
+} else {
+    Warn "Python not found in PATH — install Python $pythonVersion and re-run"
+}
+
+# ── PyTorch + AI Libraries (Windows) ─────────────────────────────────────────
+Section "PyTorch + AI Libraries (Windows)"
+if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
+    Warn "Python not available — skipping PyTorch installation"
+} else {
+    Log "Upgrading pip..."
+    python -m pip install --upgrade pip --quiet 2>$null
+
+    Log "Installing PyTorch with CUDA 12.4 support..."
+    python -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124 --quiet 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        Ok "PyTorch with CUDA 12.4 installed"
+    } else {
+        Warn "PyTorch installation may have had issues (exit code: $LASTEXITCODE)"
+    }
+
+    Log "Installing Hugging Face ecosystem and ML tools..."
+    python -m pip install transformers accelerate bitsandbytes datasets evaluate safetensors tokenizers huggingface-hub --quiet 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        Ok "Hugging Face libraries installed"
+    } else {
+        Warn "Some Hugging Face packages may have failed (exit code: $LASTEXITCODE)"
+    }
+
+    Log "Installing Triton..."
+    python -m pip install triton --quiet 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        Ok "Triton installed"
+    } else {
+        Warn "Triton installation failed — Windows support may be limited"
+    }
+
+    Log "Installing build tools (ninja, packaging, wheel, setuptools)..."
+    python -m pip install ninja packaging wheel setuptools --quiet 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        Ok "Build tools installed"
+    } else {
+        Warn "Some build tools may have failed"
+    }
+
+    # Verify PyTorch + CUDA
+    Log "Verifying PyTorch CUDA availability..."
+    $torchCheck = python -c "import torch; print(f'PyTorch {torch.__version__}, CUDA available: {torch.cuda.is_available()}, Device: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else \"N/A\"}')" 2>$null
+    if ($torchCheck) {
+        Ok $torchCheck
+    } else {
+        Warn "Could not verify PyTorch — try: python -c `"import torch; print(torch.cuda.is_available())`""
+    }
+}
+
+# ── WSL CUDA/AI Development ──────────────────────────────────────────────────
+Section "WSL CUDA/AI Development"
+$wslAvailable = [bool](Get-Command wsl -ErrorAction SilentlyContinue)
+if (-not $wslAvailable) {
+    Warn "WSL not available — skipping WSL AI setup"
+} else {
+    # Check if Ubuntu is installed
+    $wslDistros = wsl --list --quiet 2>$null
+    $ubuntuInstalled = $wslDistros -match "Ubuntu"
+    if (-not $ubuntuInstalled) {
+        Warn "Ubuntu not found in WSL — install with: wsl --install -d Ubuntu"
+    } else {
+        # Check if the AI WSL script exists
+        $wslScriptPath = "~/local/sources/helpers/scripts/setup-ai-wsl.sh"
+        $scriptExists = wsl -d Ubuntu -- test -f $wslScriptPath 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            Log "Found setup-ai-wsl.sh in WSL — invoking..."
+            wsl -d Ubuntu -- bash $wslScriptPath
+            if ($LASTEXITCODE -eq 0) {
+                Ok "WSL AI setup completed successfully"
+            } else {
+                Warn "WSL AI setup exited with code $LASTEXITCODE — check output above"
+            }
+        } else {
+            # For iex mode, try to copy the downloaded script
+            $localWslScript = Join-Path $ScriptDir "setup-ai-wsl.sh"
+            if (Test-Path $localWslScript) {
+                Log "Copying setup-ai-wsl.sh into WSL..."
+                wsl -d Ubuntu -- mkdir -p '~/local/sources/helpers/scripts' 2>$null
+                $wslTempPath = "/tmp/setup-ai-wsl.sh"
+                Get-Content $localWslScript -Raw | wsl -d Ubuntu -- bash -c "cat > $wslTempPath && chmod +x $wslTempPath && cp $wslTempPath ~/local/sources/helpers/scripts/setup-ai-wsl.sh"
+                Log "Running setup-ai-wsl.sh..."
+                wsl -d Ubuntu -- bash $wslScriptPath
+                if ($LASTEXITCODE -eq 0) {
+                    Ok "WSL AI setup completed successfully"
+                } else {
+                    Warn "WSL AI setup exited with code $LASTEXITCODE"
+                }
+            } else {
+                Warn "setup-ai-wsl.sh not found in WSL"
+                Warn "Clone the helpers repo inside WSL:"
+                Warn "  wsl -d Ubuntu"
+                Warn "  git clone https://github.com/vriveras/helpers ~/local/sources/helpers"
+                Warn "  bash ~/local/sources/helpers/scripts/setup-ai-wsl.sh"
+            }
+        }
+    }
+}
+
+# ── Verification ─────────────────────────────────────────────────────────────
+Section "Verification"
+Write-Host ""
+Log "System verification summary:"
+Write-Host ""
+
+# nvidia-smi
+if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
+    $smiShort = nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader 2>$null
+    if ($smiShort) {
+        Ok "GPU: $($smiShort.Trim())"
+    }
+} else {
+    Warn "nvidia-smi: not available"
+}
+
+# nvcc
+if ($cudaPath) {
+    $nvccExe = Join-Path $cudaPath "bin\nvcc.exe"
+    if (Test-Path $nvccExe) {
+        $nvccVer = & $nvccExe --version 2>$null | Select-String "release" | ForEach-Object { ($_ -split "release\s+")[1].TrimEnd(',') }
+        Ok "nvcc: CUDA $nvccVer"
+    }
+} elseif (Get-Command nvcc -ErrorAction SilentlyContinue) {
+    $nvccVer = nvcc --version 2>$null | Select-String "release" | ForEach-Object { ($_ -split "release\s+")[1].TrimEnd(',') }
+    Ok "nvcc: CUDA $nvccVer"
+} else {
+    Warn "nvcc: not found in PATH"
+}
+
+# Python
+if (Get-Command python -ErrorAction SilentlyContinue) {
+    $pyVer = python --version 2>$null
+    Ok "Python: $pyVer"
+} else {
+    Warn "Python: not found"
+}
+
+# torch.cuda
+if (Get-Command python -ErrorAction SilentlyContinue) {
+    $cudaAvail = python -c "import torch; print('YES' if torch.cuda.is_available() else 'NO')" 2>$null
+    if ($cudaAvail -eq "YES") {
+        Ok "torch.cuda.is_available(): True"
+    } elseif ($cudaAvail -eq "NO") {
+        Warn "torch.cuda.is_available(): False — CUDA may need restart or driver update"
+    } else {
+        Warn "torch not importable — verify installation"
+    }
+}
+
+# WSL CUDA check
+if ($wslAvailable -and $ubuntuInstalled) {
+    $wslNvidiaSmi = wsl -d Ubuntu -- nvidia-smi --query-gpu=name --format=csv,noheader 2>$null
+    if ($LASTEXITCODE -eq 0 -and $wslNvidiaSmi) {
+        Ok "WSL CUDA: $($wslNvidiaSmi.Trim()) accessible"
+    } else {
+        Warn "WSL CUDA: not accessible (may need WSL restart)"
+    }
+}
+
+# ── Done ─────────────────────────────────────────────────────────────────────
+Write-Host ""
+Write-Host @"
+
+  ╔══════════════════════════════════════════════════════╗
+  ║                                                      ║
+  ║          AI Environment Ready!                       ║
+  ║                                                      ║
+  ╚══════════════════════════════════════════════════════╝
+
+"@ -ForegroundColor Green
+
+# ── Summary ─────────────────────────────────────────────────────────────────
+Write-Host ""
+Write-Host "  ┌─ Setup Summary " -ForegroundColor Cyan -NoNewline; Write-Host "────────────────────────────────────────" -ForegroundColor DarkGray
+Write-Host ""
+
+$okCount = ($script:summary | Where-Object { $_.Icon -eq "✓" }).Count
+$warnCount = ($script:summary | Where-Object { $_.Icon -eq "⚠" }).Count
+$failCount = ($script:summary | Where-Object { $_.Icon -eq "✗" }).Count
+
+foreach ($entry in $script:summary) {
+    $color = switch ($entry.Icon) { "✓" { "Green" } "⚠" { "Yellow" } "✗" { "Red" } default { "White" } }
+    Write-Host "  $($entry.Icon)" -ForegroundColor $color -NoNewline
+    Write-Host " [$($entry.Section)]" -ForegroundColor DarkGray -NoNewline
+    Write-Host " $($entry.Message)"
+}
+
+Write-Host ""
+Write-Host "  Totals: " -NoNewline
+Write-Host "$okCount passed" -ForegroundColor Green -NoNewline
+Write-Host ", " -NoNewline
+Write-Host "$warnCount warnings" -ForegroundColor Yellow -NoNewline
+Write-Host ", " -NoNewline
+Write-Host "$failCount failed" -ForegroundColor Red
+Write-Host ""
+
+Write-Host "  Next steps:" -ForegroundColor White
+Write-Host "  1." -ForegroundColor DarkGray -NoNewline; Write-Host "  Restart your terminal to pick up PATH changes"
+Write-Host "  2." -ForegroundColor DarkGray -NoNewline; Write-Host "  Verify GPU: " -NoNewline; Write-Host "python -c `"import torch; print(torch.cuda.is_available())`"" -ForegroundColor Cyan
+Write-Host "  3." -ForegroundColor DarkGray -NoNewline; Write-Host "  In WSL: " -NoNewline; Write-Host "bash ~/local/sources/helpers/scripts/setup-ai-wsl.sh" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "  Log file: $logFile" -ForegroundColor DarkGray
+Write-Host "  Finished: $(Get-Date -Format 'HH:mm')" -ForegroundColor DarkGray
+Write-Host ""
+
+Stop-Transcript | Out-Null

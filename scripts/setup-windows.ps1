@@ -17,7 +17,22 @@ if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdent
 $ErrorActionPreference = 'Stop'
 
 # Resolve the directory this script lives in (robust against Invoke-Expression contexts)
-$ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } elseif ($PSCommandPath) { Split-Path -Parent $PSCommandPath } else { $PWD.Path }
+if ($PSScriptRoot) {
+    $ScriptDir = $PSScriptRoot
+} elseif ($PSCommandPath) {
+    $ScriptDir = Split-Path -Parent $PSCommandPath
+} else {
+    # Running via iex (no file on disk) — download companion files from GitHub
+    $ScriptDir = Join-Path $env:TEMP "helpers-setup"
+    if (-not (Test-Path $ScriptDir)) { New-Item -ItemType Directory -Path $ScriptDir -Force | Out-Null }
+    $baseUrl = "https://raw.githubusercontent.com/vriveras/helpers/main/scripts"
+    Write-Host "  " -NoNewline; Write-Host "→" -ForegroundColor Blue -NoNewline; Write-Host " Running via Invoke-Expression — downloading companion files..."
+    try {
+        Invoke-WebRequest -Uri "$baseUrl/dev-config.winget" -OutFile (Join-Path $ScriptDir "dev-config.winget") -UseBasicParsing
+    } catch {
+        Warn "Could not download dev-config.winget from GitHub: $_"
+    }
+}
 
 # ── Log File ─────────────────────────────────────────────────────────────────
 $logDir = Join-Path $HOME "local\logs"

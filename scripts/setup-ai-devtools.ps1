@@ -290,13 +290,7 @@ if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
         Warn "Some Hugging Face packages may have failed (exit code: $LASTEXITCODE)"
     }
 
-    Log "Installing Triton..."
-    python -m pip install triton --quiet 2>$null
-    if ($LASTEXITCODE -eq 0) {
-        Ok "Triton installed"
-    } else {
-        Warn "Triton installation failed — Windows support may be limited"
-    }
+    Ok "Triton — skipped on Windows (Linux/WSL only, will be installed by setup-ai-wsl.sh)"
 
     Log "Installing build tools (ninja, packaging, wheel, setuptools)..."
     python -m pip install ninja packaging wheel setuptools --quiet 2>$null
@@ -322,18 +316,24 @@ $wslAvailable = [bool](Get-Command wsl -ErrorAction SilentlyContinue)
 if (-not $wslAvailable) {
     Warn "WSL not available — skipping WSL AI setup"
 } else {
-    # Check if Ubuntu is installed
-    $wslDistros = wsl --list --quiet 2>$null
-    $ubuntuInstalled = $wslDistros -match "Ubuntu"
+    # Check if Ubuntu is installed (wsl --list outputs UTF-16 with null bytes)
+    $env:WSL_UTF8 = '1'
+    $wslOutput = wsl --list --quiet 2>$null
+    $wslDistros = @($wslOutput | ForEach-Object { ($_ -replace "`0", '').Trim() } | Where-Object { $_ })
+    $ubuntuDistro = $wslDistros | Where-Object { $_ -match 'Ubuntu' } | Select-Object -First 1
+    $ubuntuInstalled = [bool]$ubuntuDistro
+    if ($ubuntuInstalled) {
+        Log "Found WSL distro: $ubuntuDistro"
+    }
     if (-not $ubuntuInstalled) {
         Warn "Ubuntu not found in WSL — install with: wsl --install -d Ubuntu"
     } else {
         # Check if the AI WSL script exists
         $wslScriptPath = "~/local/sources/helpers/scripts/setup-ai-wsl.sh"
-        $scriptExists = wsl -d Ubuntu -- test -f $wslScriptPath 2>$null
+        $scriptExists = wsl -d $ubuntuDistro -- test -f $wslScriptPath 2>$null
         if ($LASTEXITCODE -eq 0) {
             Log "Found setup-ai-wsl.sh in WSL — invoking..."
-            wsl -d Ubuntu -- bash $wslScriptPath
+            wsl -d $ubuntuDistro -- bash $wslScriptPath
             if ($LASTEXITCODE -eq 0) {
                 Ok "WSL AI setup completed successfully"
             } else {
@@ -344,11 +344,11 @@ if (-not $wslAvailable) {
             $localWslScript = Join-Path $ScriptDir "setup-ai-wsl.sh"
             if (Test-Path $localWslScript) {
                 Log "Copying setup-ai-wsl.sh into WSL..."
-                wsl -d Ubuntu -- mkdir -p '~/local/sources/helpers/scripts' 2>$null
+                wsl -d $ubuntuDistro -- mkdir -p '~/local/sources/helpers/scripts' 2>$null
                 $wslTempPath = "/tmp/setup-ai-wsl.sh"
-                Get-Content $localWslScript -Raw | wsl -d Ubuntu -- bash -c "cat > $wslTempPath && chmod +x $wslTempPath && cp $wslTempPath ~/local/sources/helpers/scripts/setup-ai-wsl.sh"
+                Get-Content $localWslScript -Raw | wsl -d $ubuntuDistro -- bash -c "cat > $wslTempPath && chmod +x $wslTempPath && cp $wslTempPath ~/local/sources/helpers/scripts/setup-ai-wsl.sh"
                 Log "Running setup-ai-wsl.sh..."
-                wsl -d Ubuntu -- bash $wslScriptPath
+                wsl -d $ubuntuDistro -- bash $wslScriptPath
                 if ($LASTEXITCODE -eq 0) {
                     Ok "WSL AI setup completed successfully"
                 } else {
@@ -417,7 +417,7 @@ if (Get-Command python -ErrorAction SilentlyContinue) {
 
 # WSL CUDA check
 if ($wslAvailable -and $ubuntuInstalled) {
-    $wslNvidiaSmi = wsl -d Ubuntu -- nvidia-smi --query-gpu=name --format=csv,noheader 2>$null
+    $wslNvidiaSmi = wsl -d $ubuntuDistro -- nvidia-smi --query-gpu=name --format=csv,noheader 2>$null
     if ($LASTEXITCODE -eq 0 -and $wslNvidiaSmi) {
         Ok "WSL CUDA: $($wslNvidiaSmi.Trim()) accessible"
     } else {

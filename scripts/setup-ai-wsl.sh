@@ -2,6 +2,9 @@
 # WSL AI/CUDA Development Environment Setup Script
 set -euo pipefail
 
+# Ensure common system paths are available (WSL non-login shell may have minimal PATH)
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
+
 # ── Log File ──────────────────────────────────────────────────────────────────
 LOG_DIR="$HOME/local/logs"
 mkdir -p "$LOG_DIR"
@@ -162,6 +165,13 @@ ok "Build dependencies installed"
 
 # ── Python Environment ────────────────────────────────────────────────────────
 section "Python Environment"
+
+# Ensure pyenv is in PATH (needed when invoked as non-login shell)
+if [ -z "${PYENV_ROOT:-}" ] && [ -d "$HOME/.pyenv" ]; then
+    export PYENV_ROOT="$HOME/.pyenv"
+    export PATH="$PYENV_ROOT/bin:$PYENV_ROOT/shims:$PATH"
+    eval "$(pyenv init -)" 2>/dev/null || true
+fi
 
 # Check for pyenv
 if [ -d "$HOME/.pyenv" ]; then

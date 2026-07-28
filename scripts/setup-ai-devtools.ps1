@@ -177,6 +177,7 @@ if ($cudaInstalled) {
 Section "cuDNN"
 $cudnnFound = $false
 
+# Check if cuDNN is already in the CUDA toolkit path
 if ($cudaPath) {
     $cudnnDlls = Get-ChildItem -Path (Join-Path $cudaPath "bin") -Filter "cudnn*.dll" -ErrorAction SilentlyContinue
     if ($cudnnDlls) {
@@ -185,25 +186,46 @@ if ($cudaPath) {
     }
 }
 
-if (-not $cudnnFound) {
-    Log "Attempting cuDNN install via winget..."
-    winget install --id Nvidia.cuDNN --source winget --accept-package-agreements --accept-source-agreements --silent --disable-interactivity 2>$null
-    if ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq -1978335189) {
-        # Check again after install
-        if ($cudaPath) {
-            $cudnnDlls = Get-ChildItem -Path (Join-Path $cudaPath "bin") -Filter "cudnn*.dll" -ErrorAction SilentlyContinue
+# Check if cuDNN is installed via pip (nvidia-cudnn-cu12 package)
+if (-not $cudnnFound -and (Get-Command python -ErrorAction SilentlyContinue)) {
+    $cudnnPipPath = python -c "import importlib.util; spec = importlib.util.find_spec('nvidia.cudnn'); print(spec.submodule_search_locations[0] if spec else '')" 2>$null
+    if ($cudnnPipPath -and (Test-Path $cudnnPipPath)) {
+        $cudnnBin = Join-Path $cudnnPipPath "bin"
+        if (Test-Path $cudnnBin) {
+            $cudnnDlls = Get-ChildItem -Path $cudnnBin -Filter "cudnn*.dll" -ErrorAction SilentlyContinue
             if ($cudnnDlls) {
-                Ok "cuDNN installed ($($cudnnDlls.Count) DLLs in CUDA bin)"
+                $cudnnFound = $true
+                Ok "cuDNN found via pip nvidia-cudnn-cu12 ($($cudnnDlls.Count) DLLs in $cudnnBin)"
+            }
+        }
+    }
+}
+
+# Install cuDNN via pip if not found anywhere
+if (-not $cudnnFound) {
+    if (Get-Command python -ErrorAction SilentlyContinue) {
+        Log "Installing cuDNN via pip (nvidia-cudnn-cu12)..."
+        python -m pip install --quiet nvidia-cudnn-cu12 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            $cudnnPipPath = python -c "import importlib.util; spec = importlib.util.find_spec('nvidia.cudnn'); print(spec.submodule_search_locations[0] if spec else '')" 2>$null
+            if ($cudnnPipPath -and (Test-Path $cudnnPipPath)) {
+                $cudnnBin = Join-Path $cudnnPipPath "bin"
+                if (Test-Path $cudnnBin) {
+                    # Add to current session PATH
+                    $env:Path = "$cudnnBin;$env:Path"
+                    Ok "cuDNN installed via pip and added to PATH ($cudnnBin)"
+                } else {
+                    Ok "nvidia-cudnn-cu12 installed (PyTorch will find it automatically)"
+                }
             } else {
-                Warn "cuDNN package installed but DLLs not found in CUDA path — may need restart"
+                Ok "nvidia-cudnn-cu12 installed (PyTorch will find it automatically)"
             }
         } else {
-            Warn "cuDNN installed but CUDA_PATH not set — restart terminal and verify"
+            Warn "pip install nvidia-cudnn-cu12 failed — PyTorch bundles cuDNN so this is non-blocking"
+            Warn "For standalone CUDA dev: download from https://developer.nvidia.com/cudnn"
         }
     } else {
-        Warn "cuDNN not available via winget and not found in CUDA path"
-        Warn "Download cuDNN from: https://developer.nvidia.com/cudnn"
-        Warn "Extract to: $cudaPath (copy bin/, include/, lib/ folders)"
+        Warn "Python not available yet — cuDNN will be installed with PyTorch libraries later"
     }
 }
 

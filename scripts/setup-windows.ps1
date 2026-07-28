@@ -16,6 +16,9 @@ if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdent
 
 $ErrorActionPreference = 'Stop'
 
+# Resolve the directory this script lives in (robust against Invoke-Expression contexts)
+$ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } elseif ($PSCommandPath) { Split-Path -Parent $PSCommandPath } else { $PWD.Path }
+
 # ── Log File ─────────────────────────────────────────────────────────────────
 $logDir = Join-Path $HOME "local\logs"
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
@@ -99,57 +102,6 @@ if (Get-Command pwsh -ErrorAction SilentlyContinue) {
     Ok "PowerShell $pwshVer (latest)"
 } else {
     Warn "PowerShell 7 installed — restart your terminal and re-run to use pwsh"
-}
-
-# ── WSL ──────────────────────────────────────────────────────────────────────
-Section "Windows Subsystem for Linux"
-# Query feature state via dism.exe — the DISM PowerShell cmdlets throw
-# "Class not registered" when run under PowerShell 7 (they are Windows
-# PowerShell-only and their COM class fails to load in the Core runtime).
-function Get-FeatureState {
-    param([string]$FeatureName)
-    $line = dism.exe /Online /Get-FeatureInfo /FeatureName:$FeatureName 2>$null |
-        Select-String -Pattern '^State\s*:\s*(.+)$'
-    if ($line) { return $line.Matches[0].Groups[1].Value.Trim() }
-    return $null
-}
-
-$wslState = Get-FeatureState 'Microsoft-Windows-Subsystem-Linux'
-$vmState  = Get-FeatureState 'VirtualMachinePlatform'
-
-if ($wslState -eq 'Enabled' -and $vmState -eq 'Enabled') {
-    Ok "WSL and Virtual Machine Platform already enabled"
-    if (Get-Command wsl -ErrorAction SilentlyContinue) {
-        $wslVer = (wsl --version 2>$null | Select-Object -First 1)
-        if ($wslVer) { Ok "$wslVer" }
-    }
-} else {
-    Log "Enabling WSL and Virtual Machine Platform features..."
-    $needsReboot = $false
-
-    if ($wslState -ne 'Enabled') {
-        Log "Enabling Microsoft-Windows-Subsystem-Linux..."
-        dism.exe /Online /Enable-Feature /FeatureName:Microsoft-Windows-Subsystem-Linux /All /NoRestart | Out-Null
-        $needsReboot = $true
-    }
-
-    if ($vmState -ne 'Enabled') {
-        Log "Enabling VirtualMachinePlatform..."
-        dism.exe /Online /Enable-Feature /FeatureName:VirtualMachinePlatform /All /NoRestart | Out-Null
-        $needsReboot = $true
-    }
-
-    Log "Setting WSL default version to 2..."
-    wsl --set-default-version 2 2>$null
-
-    Log "Updating WSL kernel..."
-    wsl --update 2>$null
-
-    if ($needsReboot) {
-        Warn "WSL enabled — a REBOOT is required to finish setup"
-    } else {
-        Ok "WSL features enabled"
-    }
 }
 
 # ── VS Code ─────────────────────────────────────────────────────────────────
@@ -518,7 +470,7 @@ foreach ($prof in $profiles) {
 # Platform, then a RunOnce key resumes `winget configure` on next login to finish
 # installing Ubuntu. Anything after this point would not run before that reboot.
 Section "Windows Settings + Terminal + WSL Distro"
-$devConfig = Join-Path $PSScriptRoot "dev-config.winget"
+$devConfig = Join-Path $ScriptDir "dev-config.winget"
 if (-not (Test-Path $devConfig)) {
     Warn "dev-config.winget not found next to this script — skipping"
 } elseif (-not (Get-Command winget -ErrorAction SilentlyContinue)) {

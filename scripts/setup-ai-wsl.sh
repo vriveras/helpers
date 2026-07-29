@@ -36,7 +36,7 @@ die()     { echo -e "  ${RED}✗${NC} $*"; add_summary "✗" "$CURRENT_SECTION" 
 section() { echo -e "\n${CYAN}${BOLD}┌─ $* ${NC}${DIM}────────────────────────────────────────${NC}"; CURRENT_SECTION="$*"; }
 
 # ── Banner ────────────────────────────────────────────────────────────────────
-clear
+clear 2>/dev/null || true
 echo -e "${CYAN}${BOLD}"
 echo "  ██╗   ██╗██████╗ ██╗██╗   ██╗███████╗██████╗  █████╗ ███████╗"
 echo "  ██║   ██║██╔══██╗██║██║   ██║██╔════╝██╔══██╗██╔══██╗██╔════╝"
@@ -56,6 +56,17 @@ echo -e "  ${DIM}Setting up CUDA/AI Development Environment${NC}"
 echo -e "  ${DIM}WSL · Ubuntu · $(date '+%A, %B %d %Y  %H:%M')${NC}"
 echo ""
 
+# ── Sudo Check ────────────────────────────────────────────────────────────────
+# Non-interactive sessions (e.g. invoked from Windows/PowerShell) cannot prompt
+# for a password; detect this early so sudo-requiring steps degrade gracefully.
+if sudo -n true 2>/dev/null; then
+    CAN_SUDO=true
+else
+    CAN_SUDO=false
+    warn "sudo requires a password — package installation steps will be skipped"
+    warn "Run interactively or configure passwordless sudo for full setup"
+fi
+
 # ── NVIDIA GPU Detection (WSL) ────────────────────────────────────────────────
 section "NVIDIA GPU Detection (WSL)"
 if ! command -v nvidia-smi &>/dev/null; then
@@ -66,7 +77,8 @@ log "Detecting GPU via nvidia-smi..."
 GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader,nounits 2>/dev/null | head -1 | xargs)
 DRIVER_VERSION=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader,nounits 2>/dev/null | head -1 | xargs)
 CUDA_DRIVER_VERSION=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader,nounits 2>/dev/null | head -1 | xargs)
-SUPPORTED_CUDA=$(nvidia-smi 2>/dev/null | grep -oP 'CUDA Version: \K[0-9.]+' || echo "unknown")
+SUPPORTED_CUDA=$(nvidia-smi 2>/dev/null | sed -n 's/.*CUDA Version: \([0-9.]*\).*/\1/p' | head -1)
+SUPPORTED_CUDA="${SUPPORTED_CUDA:-unknown}"
 
 log "GPU: ${GPU_NAME}"
 log "Driver: ${DRIVER_VERSION}"
@@ -84,7 +96,7 @@ if [ -d "/usr/local/cuda" ]; then
 fi
 
 if command -v nvcc &>/dev/null; then
-    NVCC_VER=$(nvcc --version | grep -oP 'release \K[0-9.]+')
+    NVCC_VER=$(nvcc --version | sed -n 's/.*release \([0-9.]*\).*/\1/p')
     ok "CUDA Toolkit already installed: nvcc ${NVCC_VER}"
 else
     log "Installing CUDA Toolkit from NVIDIA repository..."
@@ -127,14 +139,17 @@ else
     if ! wget -q "$KEYRING_URL" -O /tmp/cuda-keyring.deb; then
         warn "Failed to download CUDA keyring from ${KEYRING_URL}"
         warn "Install CUDA toolkit manually: https://developer.nvidia.com/cuda-downloads"
-    else
-        sudo dpkg -i /tmp/cuda-keyring.deb
+    elif ! $CAN_SUDO; then
+        warn "CUDA keyring downloaded but sudo unavailable — skipping CUDA toolkit install"
         rm -f /tmp/cuda-keyring.deb
-        sudo apt-get update -y -q
+    else
+        sudo -n dpkg -i /tmp/cuda-keyring.deb
+        rm -f /tmp/cuda-keyring.deb
+        sudo -n apt-get update -y -q
 
         # Install CUDA toolkit (use meta-package that matches the driver's supported version)
         log "Installing cuda-toolkit (this may take a while)..."
-        sudo apt-get install -y -q cuda-toolkit 2>/dev/null || sudo apt-get install -y -q cuda-toolkit-12-6 2>/dev/null || {
+        sudo -n apt-get install -y -q cuda-toolkit 2>/dev/null || sudo -n apt-get install -y -q cuda-toolkit-12-6 2>/dev/null || {
             warn "cuda-toolkit install failed — try manually: sudo apt-get install cuda-toolkit"
         }
 
@@ -143,7 +158,7 @@ else
         export LD_LIBRARY_PATH=${CUDA_HOME}/lib64:${LD_LIBRARY_PATH:-}
 
         if command -v nvcc &>/dev/null; then
-            NVCC_VER=$(nvcc --version | grep -oP 'release \K[0-9.]+')
+            NVCC_VER=$(nvcc --version | sed -n 's/.*release \([0-9.]*\).*/\1/p')
             ok "CUDA Toolkit installed: nvcc ${NVCC_VER}"
         else
             warn "CUDA Toolkit installed but nvcc not found — may need to restart shell"
@@ -171,16 +186,22 @@ fi
 
 # Verify nvcc
 log "Verifying nvcc..."
-nvcc --version | tail -1
-ok "nvcc verified"
+if command -v nvcc &>/dev/null; then
+    nvcc --version | tail -1
+    ok "nvcc verified"
+else
+    warn "nvcc not found — CUDA toolkit may not be installed"
+fi
 
 # ── cuDNN ─────────────────────────────────────────────────────────────────────
 section "cuDNN"
 if dpkg -l libcudnn9-cuda-12 &>/dev/null 2>&1; then
     ok "cuDNN already installed"
+elif ! $CAN_SUDO; then
+    warn "cuDNN not installed and sudo unavailable — skipping"
 else
     log "Installing cuDNN 9 for CUDA 12..."
-    sudo apt-get install -y -q libcudnn9-cuda-12 libcudnn9-dev-cuda-12
+    sudo -n apt-get install -y -q libcudnn9-cuda-12 libcudnn9-dev-cuda-12
     ok "cuDNN 9 installed"
 fi
 
@@ -193,12 +214,16 @@ fi
 
 # ── Build Dependencies ────────────────────────────────────────────────────────
 section "Build Dependencies"
-log "Installing build packages..."
-sudo apt-get install -y -q build-essential cmake ninja-build git \
-    python3-dev libffi-dev libssl-dev zlib1g-dev \
-    libbz2-dev libreadline-dev libsqlite3-dev libncurses-dev \
-    liblzma-dev libxml2-dev libxmlsec1-dev tk-dev
-ok "Build dependencies installed"
+if $CAN_SUDO; then
+    log "Installing build packages..."
+    sudo -n apt-get install -y -q build-essential cmake ninja-build git \
+        python3-dev libffi-dev libssl-dev zlib1g-dev \
+        libbz2-dev libreadline-dev libsqlite3-dev libncurses-dev \
+        liblzma-dev libxml2-dev libxmlsec1-dev tk-dev
+    ok "Build dependencies installed"
+else
+    warn "sudo unavailable — skipping build dependency installation"
+fi
 
 # ── Python Environment ────────────────────────────────────────────────────────
 section "Python Environment"
@@ -214,7 +239,7 @@ fi
 if [ -d "$HOME/.pyenv" ]; then
     export PYENV_ROOT="$HOME/.pyenv"
     export PATH="$PYENV_ROOT/bin:$PATH"
-    eval "$(pyenv init -)"
+    eval "$(pyenv init -)" || true
     ok "pyenv found: $(pyenv --version)"
 else
     warn "pyenv not installed — run setup-wsl.sh first for full environment setup"
@@ -274,7 +299,11 @@ nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader
 echo ""
 
 log "nvcc:"
-nvcc --version | tail -1
+if command -v nvcc &>/dev/null; then
+    nvcc --version | tail -1
+else
+    echo "  (not available)"
+fi
 echo ""
 
 log "Python:"

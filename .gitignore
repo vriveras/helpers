@@ -1,0 +1,6 @@
+# Fleet agent runtime state — contains .fleet/daemon.token (LIVE CREDENTIAL).
+# Nothing under .fleet/ is tracked in this repo, so a blanket rule is safe here.
+.fleet/
+
+# Agent worker worktrees
+.worktrees/
